@@ -20,7 +20,7 @@ def batcher(params, batch):
     sentences = [' '.join(sent) for sent in batch]  # To reconstruct sentence from list of words
     sentence_embeddings = model.encode(sentences)   # get sentence embeddings
     for sentence, sentence_embedding in zip(batch, sentence_embeddings):
-        embeddings[model_name][' '.join(sentence)] = sentence_embedding
+        embeddings[model_name][' '.join(sentence)] = sentence_embedding.tolist()
     return sentence_embeddings
 
 
