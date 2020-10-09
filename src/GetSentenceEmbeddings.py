@@ -63,15 +63,20 @@ for model_name in model_names:
                                            f'{results[task][category]["spearman"][1]}',
                                            f'{results[task][category]["nsamples"]}'])
 
-    for print_all_content in print_all_contents:
-        print(" ".join(["{: >40}"] + ["{: >18}"] * (len(print_all_header) - 1)).format(*print_all_content))
+    with open("../results/results.201008.txt", "a") as f:
+        for print_all_content in print_all_contents:
+            print(" ".join(["{: >40}"] + ["{: >18}"] * (len(print_all_header) - 1)).format(*print_all_content), file=f)
 
-    print("")
+        print("", file=f)
 
-    for print_content in print_contents:
-        print(" ".join(["{: >40}"] + ["{: >25}"] * (len(print_header) - 2) + ["{: >10}"]).format(*print_content))
+        for print_content in print_contents:
+            print(" ".join(["{: >40}"] + ["{: >25}"] * (len(print_header) - 2) + ["{: >10}"]).format(*print_content), file=f)
 
-    with_save_embeddings = False
+        print("", file=f)
+        print("", file=f)
+
+
+    with_save_embeddings = True
     if with_save_embeddings:
         with open(f'../models/sentence_embeddings_{model_name}.pkl', 'wb') as f:
             pickle.dump(embeddings[model_name], f)
