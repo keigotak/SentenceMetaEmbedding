@@ -1,3 +1,5 @@
+# https://github.com/rjadr/GCCA
+
 from gcca.gcca import GCCA
 import logging
 import numpy as np
