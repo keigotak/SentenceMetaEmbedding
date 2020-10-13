@@ -21,24 +21,27 @@ for model_pkl in model_pkls:
 
 sentences = embedding.keys()
 
-vectors = [[] for _ in embeddings.keys()]
+vectors = [[] for _ in range(len(model_pkls))]
 key_to_index = {key: i for i, key in enumerate(embeddings.keys())}
 for sentence in sentences:
+    vector = []
     for model_type in embeddings.keys():
         vectors[key_to_index[model_type]].append(embeddings[model_type][sentence].tolist())
 
-vectors = np.array(vectors)
-
+a = np.array(vectors[0])
+b = np.array(vectors[1])
+c = np.array(vectors[2])
+d = np.array(vectors[3])
 
 # create instance of GCCA
 gcca = GCCA()
 # calculate GCCA
-gcca.fit(*vectors)
+gcca.fit(a, b, c, d)
 # transform
-gcca.transform(*vectors)
+gcca.transform(a, b, c, d)
 # save
-gcca.save_params("../../models/sts_gcca.h5")
+gcca.save_params("../models/sts_gcca.h5")
 # load
-gcca.load_params("../../models/sts_gcca.h5")
+gcca.load_params("../models/sts_gcca.h5")
 # plot
 gcca.plot_result()
