@@ -1,5 +1,4 @@
 import senteval
-from sentence_transformers import SentenceTransformer
 import pickle
 from decimal import Decimal, ROUND_HALF_UP
 from gcca.gcca import GCCA
@@ -38,7 +37,7 @@ def batcher(params, batch):
 
     gcca_embeddings = gcca_model.transform(alist, blist, clist, dlist)
 
-    return gcca_embeddings[1]
+    return gcca_embeddings[3]
 
 
 model_name = 'gcca'
