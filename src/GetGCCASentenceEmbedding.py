@@ -14,9 +14,7 @@ class GetGCCASentenceEmbedding(AbstructGetSentenceEmbedding):
         self.with_save_embeddings = False
 
         self.input_model_names = ['bert-large-nli-stsb-mean-tokens',
-                                  'distilbert-base-nli-stsb-mean-tokens',
-                                  'roberta-base-nli-stsb-mean-tokens',
-                                  'roberta-large-nli-stsb-mean-tokens']
+                                  'use']
         self.sentence_embeddings = {}
         for model_name in self.input_model_names:
             with open(f'../models/sentence_embeddings_{model_name}.pkl', 'rb') as f:
@@ -25,7 +23,7 @@ class GetGCCASentenceEmbedding(AbstructGetSentenceEmbedding):
     def get_model(self):
         if self.model is None:
             self.model = GCCA()
-            self.model.load_params("../models/sts_gcca.h5")
+            self.model.load_params("../models/sts.gcca.bert.use.h5")
         return self.model
 
     def batcher(self, params, batch):

@@ -54,8 +54,15 @@ class GCCA:
 
 if __name__ == '__main__':
     np.random.seed(0)
-    arr = np.random.randn(2, 10)
-    # arr = np.array([[1., 0.], [0., 1.]])
+    # arr = np.random.randn(2, 10)
+
+    arr = np.array([[1., 0.], [0., 1.]])
+    '''
+    [[ 0.5  0.5  0.5  0.5]
+     [-0.5  0.5 -0.5  0.5]
+     [-0.5  0.5  0.5 -0.5]
+     [ 0.5  0.5 -0.5 -0.5]]
+    '''
 
     gcca = GCCA()
     eigen_vectors = gcca.fit(arr)

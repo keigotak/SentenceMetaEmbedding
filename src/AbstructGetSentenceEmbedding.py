@@ -25,9 +25,12 @@ class AbstructGetSentenceEmbedding:
         for model_name in self.model_names:
             self.single_eval(model_name=model_name)
 
+    def get_params(self):
+        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True}
+
     def single_eval(self, model_name):
         self.model = self.get_model()
-        params = {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True}
+        params = self.get_params()
         params['encoder'] = self.model
 
         se = senteval.engine.SE(params, self.batcher)

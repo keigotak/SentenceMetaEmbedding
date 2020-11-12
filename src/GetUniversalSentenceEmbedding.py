@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow_hub as hub
 import tensorflow as tf
 from AbstructGetSentenceEmbedding import *
@@ -13,15 +14,25 @@ class GetUniversalSentenceEmbedding(AbstructGetSentenceEmbedding):
 
     def get_model(self):
         if self.model is None:
-            self.model = hub.Module("../models/universal-sentence-encoder_2")
+            self.model = hub.Module("../models/universal-sentence-encoder-large_3")
         return self.model
+
+    def get_params(self):
+        params_senteval = {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True, 'kfold': 5}
+        params_senteval['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 128,
+                                         'tenacity': 3, 'epoch_size': 2}
+        return params_senteval
 
     def batcher(self, params, batch):
         if self.model is None:
             self.get_model()
 
+        config = tf.ConfigProto(
+            device_count={'GPU': 0}
+        )
+
         sentences = [' '.join(sent) for sent in batch]  # To reconstruct sentence from list of words
-        with tf.Session() as session:
+        with tf.Session(config=config) as session:
             session.run([tf.global_variables_initializer(), tf.tables_initializer()])
             sentence_embeddings = session.run(self.model(sentences)).tolist()  # get sentence embeddings
         for sentence, sentence_embedding in zip(batch, sentence_embeddings):
