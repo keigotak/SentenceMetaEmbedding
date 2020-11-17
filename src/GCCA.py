@@ -36,6 +36,7 @@ class GCCA:
                     cm_sum += self.get_covariance_matrics(centerized_vectors[i][k], centerized_vectors[j][k])
                 covariance_matrices.append(cm_sum.tolist())
 
+        ## unpacking covariance_matrices to separate diagonals and others
         cross_vectors_a = []
         cross_vectors_b = []
         flg_new_row = False
