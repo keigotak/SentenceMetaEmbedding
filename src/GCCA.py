@@ -28,6 +28,7 @@ class GCCA:
         centerized_vectors = [self.centering(vector) for vector in vectors]  # centerized by average for each column
         div_vectors = [self.get_variance(vector) for vector in vectors]
 
+        ## getting covariance matrix for each src embedding pair of
         covariance_matrices = []
         for i in range(len(centerized_vectors)):  # for src1 to calculate covariance matrix
             for j in range(len(centerized_vectors)):  # for src2 to calculate covariance matrix
@@ -36,13 +37,13 @@ class GCCA:
                     cm_sum += self.get_covariance_matrics(centerized_vectors[i][k], centerized_vectors[j][k])
                 covariance_matrices.append(cm_sum.tolist())
 
-        ## unpacking covariance_matrices to separate diagonals and others
+        ## unpacking covariance_matrices to allocate diagonal matrix and other components, separately.
         cross_vectors_a = []
         cross_vectors_b = []
         flg_new_row = False
         flg_diagonal = False
         col, previous_dim = 0, 0
-        for i, cm in enumerate(covariance_matrices):
+        for i, cm in enumerate(covariance_matrices):  ## for each covariance matrix
             if i % len(vectors) == 0:
                 flg_new_row = True
             if i % len(vectors) == 0 and i != 0:
@@ -86,9 +87,11 @@ if __name__ == '__main__':
     np.random.seed(0)
     x1 = np.random.randn(5, 10)
     x2 = np.random.randn(5, 12)
+    x1 = [[1., 0.], [0., 1.]]
+    x2 = [[1., 0.], [0., 1.]]
 
     gcca = GCCA()
-    ret = gcca.fit([x1, x2])
+    eigen_vectors = gcca.fit([x1, x2])
 
     print(eigen_vectors)
     print(eigen_vectors.shape)
