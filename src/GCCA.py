@@ -75,12 +75,10 @@ class GCCA:
         eigen_values_real_part, eigen_vectors_real_part = eigen_values.real, eigen_vectors.real
 
         ## stacking all eigen vectors
-        eigen_vector_matrix = eigen_vectors_real_part  ## d1 + d2 * d1 + d2
-
-        return eigen_vector_matrix
+        self.eta = eigen_vectors_real_part  ## d1 + d2 * d1 + d2
 
     def transform(self, vectors):
-        pass
+        return self.eta @ vectors
 
 
 if __name__ == '__main__':
