@@ -22,9 +22,18 @@ class GCCA:
         return std_for_columns
 
     def get_covariance_matrics(self, x1, x2):
+        '''
+        :param x1: source embedding vector 1
+        :param x2: source embedding vector 2
+        :return: covariance matrix
+        '''
         return np.outer(x1, x2)
 
     def fit(self, vectors):
+        '''
+        :param vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
+        :return: None
+        '''
         centerized_vectors = [self.centering(vector) for vector in vectors]  # centerized by average for each column
         div_vectors = [self.get_variance(vector) for vector in vectors]
 
@@ -78,6 +87,10 @@ class GCCA:
         self.eta = eigen_vectors_real_part  ## d1 + d2 * d1 + d2
 
     def transform(self, vectors):
+        '''
+        :param vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
+        :return: transformed vectors
+        '''
         return self.eta @ vectors
 
 
