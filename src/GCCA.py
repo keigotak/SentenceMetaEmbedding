@@ -85,10 +85,11 @@ if __name__ == '__main__':
     np.random.seed(0)
     x1 = np.random.randn(5, 10)
     x2 = np.random.randn(5, 12)
-    x1 = [[1., 0.], [0., 1.]]
-    x2 = [[1., 0.], [0., 1.]]
+    x1 = [[40, 80], [80, 90], [90, 100]]
+    x2 = [[40, 80], [80, 90], [90, 100]]
 
     gcca = GCCA()
+    print(gcca.get_covariance_matrics(x1, x2))
     eigen_vectors = gcca.fit([x1, x2])
 
     print(eigen_vectors)
