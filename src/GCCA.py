@@ -1,11 +1,14 @@
 import numpy as np
 from scipy.sparse.linalg import eigs
 from scipy.linalg import eig
+import pickle
+from pathlib import Path
 
 
 
 class GCCA:
     def __init__(self):
+        self.eta_path = Path('../models/sts_gcca.pkl')
         self.eta = None
 
     def centering(self, x):
@@ -57,7 +60,7 @@ class GCCA:
                 flg_new_row = True
             if i % len(vectors) == 0 and i != 0:
                 col += 1
-                previous_dim += len(cm[0])
+                previous_dim = len(cm[0])
             if i % len(vectors) == col:
                 flg_diagonal = True
 
@@ -91,19 +94,35 @@ class GCCA:
         :param vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
         :return: transformed vectors
         '''
-        return self.eta @ vectors
+        rets = []
+
+        batch_size = len(vectors[0])
+        for b in range(batch_size):
+            tmp = []
+            for i in range(len(vectors)):
+                tmp.extend(vectors[i][b])
+            rets.append(np.dot(self.eta, tmp).tolist())
+        return np.array(rets)
+
+    def save_model(self):
+        with self.eta_path.open('wb') as f:
+            pickle.dump(self.eta, f)
+
+    def load_model(self):
+        with self.eta_path.open('rb') as f:
+            self.eta = pickle.load(f)
 
 
 if __name__ == '__main__':
     np.random.seed(0)
     x1 = np.random.randn(5, 10)
     x2 = np.random.randn(5, 12)
-    x1 = [[40, 80], [80, 90], [90, 100]]
-    x2 = [[40, 80], [80, 90], [90, 100]]
+    # x1 = [[40, 80], [80, 90], [90, 100]]
+    # x2 = [[40, 80], [80, 90], [90, 100]]
 
     gcca = GCCA()
     print(gcca.get_covariance_matrics(x1, x2))
-    eigen_vectors = gcca.fit([x1, x2])
+    gcca.fit([x1, x2])
 
-    print(eigen_vectors)
-    print(eigen_vectors.shape)
+    print(gcca.eta)
+    print(gcca.eta.shape)
