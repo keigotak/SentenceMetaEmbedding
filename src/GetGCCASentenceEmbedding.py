@@ -1,4 +1,3 @@
-from gcca.gcca import GCCA
 import numpy as np
 from AbstructGetSentenceEmbedding import *
 
@@ -9,39 +8,28 @@ class GetGCCASentenceEmbedding(AbstructGetSentenceEmbedding):
         super().__init__()
         self.model_names = ['gcca']
         self.embeddings = {model_name: {} for model_name in self.model_names}
-        self.output_file_name = 'results.gcca.201017.txt'
+        self.output_file_name = 'results.gcca.201227.txt'
         self.with_reset_output_file = False
         self.with_save_embeddings = False
 
-        self.input_model_names = ['bert-large-nli-stsb-mean-tokens',
-                                  'use']
-        self.sentence_embeddings = {}
-        for model_name in self.input_model_names:
-            with open(f'../models/sentence_embeddings_{model_name}.pkl', 'rb') as f:
-                self.sentence_embeddings[model_name] = pickle.load(f)
+        self.indexer = None
 
     def get_model(self):
-        if self.model is None:
-            self.model = GCCA()
-            self.model.load_params("../models/sts.gcca.bert.use.h5")
+        with open('../models/sts_gcca.pkl', 'rb') as f:
+            self.model = pickle.load(f)
+        with open('../models/sts_gcca_sentence_indexer.pkl', 'rb') as f:
+            self.indexer = pickle.load(f)
         return self.model
 
     def batcher(self, params, batch):
         sentences = [' '.join(sent) for sent in batch]  # To reconstruct sentence from list of words
-
-        # gcca_embeddings = []
-        alist, blist, clist, dlist = [], [], [], []
+        sentence_embeddings = []
         for sentence in sentences:
-            alist.append(self.sentence_embeddings[self.input_model_names[0]][sentence].tolist())
-            blist.append(self.sentence_embeddings[self.input_model_names[1]][sentence].tolist())
-            clist.append(self.sentence_embeddings[self.input_model_names[2]][sentence].tolist())
-            dlist.append(self.sentence_embeddings[self.input_model_names[3]][sentence].tolist())
-
-        alist, blist, clist, dlist = np.array(alist), np.array(blist), np.array(clist), np.array(dlist)
-
-        gcca_embeddings = self.model.transform(alist, blist, clist, dlist)
-
-        return gcca_embeddings[0]
+            indexes = self.indexer[sentence]
+            sentence_embedding = self.model[indexes].tolist()
+            sentence_embeddings.append(sentence_embedding)  # get sentence embeddings
+            self.embeddings[model_name][sentence] = sentence_embedding
+        return np.array(sentence_embeddings)
 
 
 if __name__ == '__main__':

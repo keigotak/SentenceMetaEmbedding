@@ -8,13 +8,14 @@ class EvaluateSentenceEmbedding(AbstructGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "2"
         super().__init__()
-        self.model_names = ['roberta-large-nli-stsb-mean-tokens',
-                            'roberta-base-nli-stsb-mean-tokens',
-                            'bert-large-nli-stsb-mean-tokens',
-                            'distilbert-base-nli-stsb-mean-tokens',
-                            'use']
+        # self.model_names = ['roberta-large-nli-stsb-mean-tokens',
+        #                     'roberta-base-nli-stsb-mean-tokens',
+        #                     'bert-large-nli-stsb-mean-tokens',
+        #                     'distilbert-base-nli-stsb-mean-tokens',
+        #                     'use']
+        self.model_names = ['gcca']
         self.embeddings = {model_name: {} for model_name in self.model_names}
-        self.with_reset_output_file = True
+        self.with_reset_output_file = False
         self.with_save_embeddings = False
 
     def get_model(self):

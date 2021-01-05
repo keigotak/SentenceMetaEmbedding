@@ -4,10 +4,12 @@ from pathlib import Path
 from GCCA import GCCA
 
 
+# model_pkls = ["../models/sentence_embeddings_bert-large-nli-stsb-mean-tokens.pkl",
+#               "../models/sentence_embeddings_distilbert-base-nli-stsb-mean-tokens.pkl",
+#               "../models/sentence_embeddings_roberta-base-nli-stsb-mean-tokens.pkl",
+#               "../models/sentence_embeddings_roberta-large-nli-stsb-mean-tokens.pkl"]
 model_pkls = ["../models/sentence_embeddings_bert-large-nli-stsb-mean-tokens.pkl",
-              "../models/sentence_embeddings_distilbert-base-nli-stsb-mean-tokens.pkl",
-              "../models/sentence_embeddings_roberta-base-nli-stsb-mean-tokens.pkl",
-              "../models/sentence_embeddings_roberta-large-nli-stsb-mean-tokens.pkl"]
+              "../models/sentence_embeddings_use.pkl"]
 
 embeddings = {}
 for model_pkl in model_pkls:
@@ -19,7 +21,8 @@ sentences = embedding.keys()
 
 vectors = [[] for _ in range(len(model_pkls))]
 key_to_index = {key: i for i, key in enumerate(embeddings.keys())}
-for sentence in sentences:
+sentence_to_index = {}
+for i, sentence in enumerate(sentences):
     vector = []
     for model_type in embeddings.keys():
         tmp = embeddings[model_type][sentence]
@@ -27,6 +30,7 @@ for sentence in sentences:
             vectors[key_to_index[model_type]].append(embeddings[model_type][sentence].tolist())
         else:
             vectors[key_to_index[model_type]].append(embeddings[model_type][sentence])
+    sentence_to_index[sentence] = i
 
 #
 # a = np.array(vectors[0])
@@ -53,6 +57,10 @@ for sentence in sentences:
 gcca = GCCA()
 gcca.fit(vectors)
 gcca.save_model()
-gcca.transform(vectors)
+gcca_vectors = gcca.transform(vectors)
+with Path('../models/sts_gcca.pkl').open('wb') as f:
+    pickle.dump(gcca_vectors, f)
+with Path('../models/sts_gcca_sentence_indexer.pkl').open('wb') as f:
+    pickle.dump(sentence_to_index, f)
 
 

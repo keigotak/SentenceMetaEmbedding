@@ -8,7 +8,7 @@ from pathlib import Path
 
 class GCCA:
     def __init__(self):
-        self.eta_path = Path('../models/sts_gcca.pkl')
+        self.eta_path = Path('../models/sts_gcca_eta.pkl')
         self.eta = None
 
     def centering(self, x):
@@ -77,8 +77,13 @@ class GCCA:
                         cross_vectors_a[col * previous_dim + j].extend(c)
                         cross_vectors_b[col * previous_dim + j].extend([0.0] * len(c))
                     else:
-                        cross_vectors_a[col * previous_dim + j].extend([0.0] * len(c))
-                        cross_vectors_b[col * previous_dim + j].extend(c)
+                        try:
+                            cross_vectors_a[col * previous_dim + j].extend([0.0] * len(c))
+                            cross_vectors_b[col * previous_dim + j].extend(c)
+                        except IndexError:
+                            print(len(cross_vectors_a))
+                            print(len(cross_vectors_a[0]))
+                            print(col*previous_dim + j)
             flg_new_row = False
             flg_diagonal = False
 
