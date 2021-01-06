@@ -17,17 +17,11 @@ class TrainAttentionWithSTSBenchmark:
         self.source = {model: GetHuggingfaceWordEmbedding(model) for model in self.model_names}
         self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
         self.attention_head_num = 1
-        if self.attention_head_num > 1:
-            self.attention = MultiheadSelfAttentionModel(dimensions=self.total_dim, num_head=self.attention_head_num)
-        else:
-            self.attention = AttentionModel(dimensions=self.total_dim)
-        # self.regressor = nn.Linear(self.total_dim, 1)  # concatenate each sentence
-        # self.dropout = nn.Dropout(0.2)
-        # params = list(self.attention.parameters()) + list(self.regressor.parameters())
-        params = list(self.attention.parameters())
-        self.criterion = nn.MSELoss()
-        self.optimizer = torch.optim.SGD(params, lr=0.001)
-        # self.sigmoid = nn.Sigmoid()
+        self.attention = nn.MultiheadAttention(embed_dim=self.total_dim, num_heads=self.attention_head_num, dropout=0.2)
+        self.learning_ratio = 0.01
+        self.gradient_clip = 0.2
+        self.parameters = list(self.attention.parameters())
+        self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio)
 
         self.attention_output_pooling_method = 'avg'
 
@@ -39,7 +33,7 @@ class TrainAttentionWithSTSBenchmark:
         while not self.datasets[mode].is_batch_end():
             sentences1, sentences2, scores = self.datasets[mode].get_batch()
 
-            ## get vector representation for each embedding
+            ## get vector representation for each embedding and batch data
             batch_embeddings = []
             with torch.no_grad():
                 for sent1, sent2 in zip(sentences1, sentences2):
@@ -55,28 +49,26 @@ class TrainAttentionWithSTSBenchmark:
             running_loss = 0.0
             self.optimizer.zero_grad()
             for embeddings, score in zip(batch_embeddings, scores):
-                attention_outputs, attention_weights = [], []
+                attention_outputs, attention_weights, normalized_outputs = [], [], []
                 for i in range(2):  # for input sentences, sentence1 and sentence2
-                    feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0)
-                    if self.attention_head_num > 1:
-                        output, attention_weight = self.attention(feature)
-                    else:
-                        output, attention_weight = self.attention(feature, feature)
+                    feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
+                    output, attention_weight = self.attention(feature, feature, feature)
+                    output = output.transpose(0, 1)
 
                     if self.attention_output_pooling_method == 'avg':
                         pooled_output = torch.mean(output, dim=1)
                     elif self.attention_output_pooling_method == 'concat':
                         pooled_output = torch.cat([out for out in output.squeeze(0)])
+                    elif self.attention_output_pooling_method == 'max':
+                        pooled_output = torch.max(output, dim=1)
 
                     attention_outputs.append(pooled_output)
                     attention_weights.append(attention_weight)
-
-                # logits = self.regressor(self.dropout(torch.cat(attention_outputs, dim=1)))
-                # sigmoid = self.sigmoid(logits)
-                # loss = self.criterion(sigmoid, torch.FloatTensor([score]).unsqueeze(0))
+                    normalized_outputs.append(pooled_output / torch.sum(pooled_output))
 
                 loss = (torch.dot(attention_outputs[0].squeeze(0), attention_outputs[1].squeeze(0)) - score) ** 2
                 loss.backward()
+                nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
                 self.optimizer.step()
 
                 running_loss += loss.item()
@@ -113,25 +105,22 @@ class TrainAttentionWithSTSBenchmark:
 
                 # get attention output
                 for embeddings, score in zip(batch_embeddings, scores):
-                    attention_outputs, attention_weights = [], []
+                    attention_outputs, attention_weights, normalized_outputs = [], [], []
                     for i in range(2):  # for input sentences, sentence1 and sentence2
-                        feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0)
-                        if self.attention_head_num > 1:
-                            output, attention_weight = self.attention(feature)
-                        else:
-                            output, attention_weight = self.attention(feature, feature)
+                        feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
+                        output, attention_weight = self.attention(feature, feature, feature)
+                        output = output.transpose(0, 1)
 
                         if self.attention_output_pooling_method == 'avg':
                             pooled_output = torch.mean(output, dim=1)
                         elif self.attention_output_pooling_method == 'concat':
                             pooled_output = torch.cat([out for out in output.squeeze(0)])
+                        elif self.attention_output_pooling_method == 'max':
+                            pooled_output = torch.max(output, dim=1)
 
                         attention_outputs.append(pooled_output)
                         attention_weights.append(attention_weight)
-
-                    # logits = self.regressor(self.dropout(torch.cat(attention_outputs, dim=1)))
-                    # sigmoid = self.sigmoid(logits)
-                    # loss = self.criterion(sigmoid, torch.FloatTensor([score]).unsqueeze(0))
+                        normalized_outputs.append(pooled_output / torch.sum(pooled_output))
 
                     loss = (torch.dot(attention_outputs[0].squeeze(0), attention_outputs[1].squeeze(0)) - score) ** 2
 
@@ -177,13 +166,17 @@ class EvaluateAttentionModel(AbstructGetSentenceEmbedding):
 
                 # get attention output
                 feature = torch.cat([torch.FloatTensor(embeddings[model_name]) for model_name in self.model_names], dim=1).unsqueeze(0)
-                output, attention_weight = self.model.attention(feature, feature)
-                # output, attention_weight = self.model.attention(feature)
+                if self.model.attention_head_num > 1:
+                    output, attention_weight = self.model.attention(feature)
+                else:
+                    output, attention_weight = self.model.attention(feature, feature)
 
                 if self.model.attention_output_pooling_method == 'avg':
                     pooled_output = torch.mean(output, dim=1).squeeze(0).tolist()
                 elif self.model.attention_output_pooling_method == 'concat':
                     pooled_output = torch.cat([out for out in output.squeeze(0)])
+                elif self.model.attention_output_pooling_method == 'max':
+                    pooled_output = torch.max(output, dim=1)
 
                 attention_outputs.append(pooled_output)
                 attention_weights.append(attention_weight)
@@ -194,13 +187,19 @@ class EvaluateAttentionModel(AbstructGetSentenceEmbedding):
 
 
 if __name__ == '__main__':
-    cls = EvaluateAttentionModel()
-    trainer = TrainAttentionWithSTSBenchmark()
-    for e in range(10):
-        trainer.train_epoch()
-        trainer.save_model()
+    with_senteval = False
+    if with_senteval:
+        cls = EvaluateAttentionModel()
+        trainer = TrainAttentionWithSTSBenchmark()
+        for e in range(10):
+            print(f'epoch: {e}')
+            trainer.train_epoch()
+            trainer.save_model()
 
-        cls.load_model()
-        cls.single_eval(cls.model_tag[0])
-        if cls.with_reset_output_file:
-            cls.with_reset_output_file = False
+            cls.load_model()
+            cls.single_eval(cls.model_tag[0])
+            if cls.with_reset_output_file:
+                cls.with_reset_output_file = False
+    else:
+        trainer = TrainAttentionWithSTSBenchmark()
+        trainer.train()
