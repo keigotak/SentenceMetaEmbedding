@@ -20,7 +20,7 @@ class STSDataset:
 
         self.texts = None
         with self.path.open('r') as f:
-            self.texts = [self.get_data_dict(*line.strip().split('\t')) for line in f.readlines()[:10]]
+            self.texts = [self.get_data_dict(*line.strip().split('\t')) for line in f.readlines()]
         self.dataset_size = len(self.texts)
 
     @staticmethod
