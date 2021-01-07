@@ -4,8 +4,6 @@ from pathlib import Path
 
 
 class STSDataset:
-    random.seed(91)
-
     def __init__(self, mode='train'):
         self.current = 0
         self.batch_size = 4
