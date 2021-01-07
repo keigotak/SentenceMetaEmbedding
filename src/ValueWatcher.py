@@ -12,6 +12,7 @@ class ValueWatcher:
         self.is_new = False
         self.mode = mode
         self.threshold = threshold
+        self.epoch = 0
 
     def update(self, val):
         if self.current is None:
@@ -44,6 +45,8 @@ class ValueWatcher:
         else:
             self.is_max = False
             self.is_min = False
+
+        self.epoch += 1
 
     def is_over(self):
         if self.mode == 'maximize':
