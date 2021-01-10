@@ -31,7 +31,7 @@ class TrainSeq2seqWithSTSBenchmark:
         self.meta_embedding_dim = 300
         self.projection_matrices = {key: torch.randn((self.embedding_dims[key], self.meta_embedding_dim), requires_grad=True) for key in self.model_names}
 
-        self.nonlinear = nn.Tanh()
+        self.nonlinear = nn.ReLU()
         self.parameter_vector = torch.randn(self.meta_embedding_dim)
 
         self.attention_head_num = 1
@@ -39,6 +39,7 @@ class TrainSeq2seqWithSTSBenchmark:
         self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=0.2)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
+        self.lambda_e, self.lambda_d = 0.0001, 0.0001
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio)
 
@@ -108,8 +109,7 @@ class TrainSeq2seqWithSTSBenchmark:
                     wd = self.projection_matrices[self.model_names[decoder_model_idx]]
                     l_wd = torch.square(torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
 
-                    lambda_e, lambda_d = 0.0001, 0.0001
-                    loss = le + ld + lambda_e * l_we + lambda_d * l_wd
+                    loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
 
                     loss.backward()
                     nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
@@ -217,8 +217,7 @@ class TrainSeq2seqWithSTSBenchmark:
                         l_wd = torch.square(
                             torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
 
-                        lambda_e, lambda_d = 0.0001, 0.0001
-                        loss = le + ld + lambda_e * l_we + lambda_d * l_wd
+                        loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
 
                         running_loss += loss.item()
 
