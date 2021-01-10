@@ -46,7 +46,7 @@ class TrainSeq2seqWithSTSBenchmark:
 
         self.save_model_path = '../models/seq2seq.pkl'
 
-    def train_epoch(self, with_pbar=True):
+    def train_epoch(self, with_pbar=False):
         mode = 'train'
         if with_pbar:
             pbar = tqdm(total=self.datasets[mode].dataset_size)
