@@ -277,7 +277,7 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
         self.model.load_model()
 
     def batcher(self, params, batch):
-        attention_outputs, attention_weights = [], []
+        fe_prime_outputs, fd_prime_outputs = [], []
         with torch.no_grad():
             for sentence in batch:
                 embeddings = {}
@@ -320,7 +320,10 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                     pooled_fe_prime = torch.max(fe_prime, dim=0)
                     pooled_fd_prime = torch.max(fd_prime, dim=0)
 
-        return np.array(pooled_fd_prime.tolist())
+                fe_prime_outputs.append(pooled_fe_prime.tolist())
+                fd_prime_outputs.append(pooled_fd_prime.tolist())
+
+        return np.array(fd_prime_outputs)
 
 
 if __name__ == '__main__':
