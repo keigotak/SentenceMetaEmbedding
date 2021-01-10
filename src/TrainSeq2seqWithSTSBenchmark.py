@@ -248,12 +248,18 @@ class TrainSeq2seqWithSTSBenchmark:
     def save_model(self):
         for key, value in self.projection_matrices.items():
             torch.save(value, self.get_save_path('projection-' + key))
+        torch.save(self.attention.state_dict(), self.get_save_path('attention'))
+        torch.save(self.parameter_vector, self.get_save_path('param_vector'))
 
     def load_model(self):
         if not os.path.exists(self.save_model_path):
             pass
         else:
-            self.attention.load_state_dict(torch.load(self.save_model_path))
+            for key in self.projection_matrices.keys():
+                self.projection_matrices[key] = torch.load(self.get_save_path('projection-' + key))
+            self.attention.load_state_dict(torch.load(self.get_save_path('attention')))
+            self.parameter_vector = torch.load(self.get_save_path('param_vector'))
+
 
     def get_round_score(self, score):
         return Decimal(str(score * 100)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
@@ -332,7 +338,7 @@ if __name__ == '__main__':
         dp = DataPooler()
         vw = ValueWatcher()
         cls = EvaluateSeq2seqModel()
-        trainer = cls.model
+        trainer = TrainSeq2seqWithSTSBenchmark()
         while not vw.is_over():
             print(f'epoch: {vw.epoch}')
             trainer.train_epoch()
@@ -344,10 +350,12 @@ if __name__ == '__main__':
                 dp.set('best-epoch', vw.epoch)
                 dp.set('best-score', vw.max_score)
             dp.set(f'scores', rets)
-
         print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+
+        trainer.load_model()
         rets = trainer.inference(mode='test')
         print(f'test best scores: ' + ' '.join(rets['prints']))
+        cls.model = trainer
         cls.single_eval(cls.model_tag[0])
     else:
         trainer = TrainSeq2seqWithSTSBenchmark()
