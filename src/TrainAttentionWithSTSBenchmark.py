@@ -233,7 +233,7 @@ if __name__ == '__main__':
         dp = DataPooler()
         vw = ValueWatcher()
         cls = EvaluateAttentionModel()
-        trainer = cls.model
+        trainer = TrainAttentionWithSTSBenchmark()
         while not vw.is_over():
             print(f'epoch: {vw.epoch}')
             trainer.train_epoch()
@@ -245,10 +245,12 @@ if __name__ == '__main__':
                 dp.set('best-epoch', vw.epoch)
                 dp.set('best-score', vw.max_score)
             dp.set(f'scores', rets)
-
         print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+
+        trainer.load_model()
         rets = trainer.inference(mode='test')
         print(f'test best scores: ' + ' '.join(rets['prints']))
+        cls.model = trainer
         cls.single_eval(cls.model_tag[0])
     else:
         trainer = TrainAttentionWithSTSBenchmark()
