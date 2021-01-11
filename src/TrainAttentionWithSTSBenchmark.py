@@ -31,8 +31,9 @@ class TrainAttentionWithSTSBenchmark:
         self.attention = nn.MultiheadAttention(embed_dim=self.total_dim, num_heads=self.attention_head_num, dropout=0.2)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
+        self.weight_decay = 0.01
         self.parameters = list(self.attention.parameters())
-        self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio)
+        self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
 
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
 

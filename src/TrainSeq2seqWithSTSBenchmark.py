@@ -39,7 +39,7 @@ class TrainSeq2seqWithSTSBenchmark:
         self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=0.2)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
-        self.lambda_e, self.lambda_d = 0.0001, 0.0001
+        self.lambda_e, self.lambda_d = 0.001, 0.001
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio)
 
@@ -221,7 +221,7 @@ class TrainSeq2seqWithSTSBenchmark:
 
                         running_loss += loss.item()
 
-                    sys_score = self.similarity(fd_prime_outputs[0].tolist(), fd_prime_outputs[1].tolist())
+                    sys_score = self.similarity(fe_prime_outputs[0].tolist(), fe_prime_outputs[1].tolist())
                     sys_scores.append(sys_score)
                     gs_scores.append(score)
 
@@ -328,7 +328,7 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                 fe_prime_outputs.append(pooled_fe_prime.tolist())
                 fd_prime_outputs.append(pooled_fd_prime.tolist())
 
-        return np.array(fd_prime_outputs)
+        return np.array(fe_prime_outputs)
 
 
 if __name__ == '__main__':
