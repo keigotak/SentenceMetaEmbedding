@@ -47,6 +47,7 @@ class TrainSeq2seqWithSTSBenchmark:
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
 
         self.save_model_path = '../models/seq2seq.pkl'
+        self.output_by = 'decoder'
 
     def train_epoch(self, with_pbar=False):
         mode = 'train'
@@ -222,7 +223,11 @@ class TrainSeq2seqWithSTSBenchmark:
 
                         running_loss += loss.item()
 
-                    sys_score = self.similarity(fe_prime_outputs[0].tolist(), fe_prime_outputs[1].tolist())
+                    if self.output_by == 'encoder':
+                        sys_score = self.similarity(fe_prime_outputs[0].tolist(), fe_prime_outputs[1].tolist())
+                    else:
+                        sys_score = self.similarity(fd_prime_outputs[0].tolist(), fd_prime_outputs[1].tolist())
+
                     sys_scores.append(sys_score)
                     gs_scores.append(score)
 
@@ -275,6 +280,7 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
         self.with_save_embeddings = False
         self.model = TrainSeq2seqWithSTSBenchmark()
         self.output_file_name = 'seq2seq_test.txt'
+        self.output_by = self.model.output_by
 
     def get_model(self):
         return self.model
@@ -329,7 +335,11 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                 fe_prime_outputs.append(pooled_fe_prime.tolist())
                 fd_prime_outputs.append(pooled_fd_prime.tolist())
 
-        return np.array(fe_prime_outputs)
+        if self.output_by == 'encoder':
+            outputs = fe_prime_outputs
+        else:
+            outputs = fd_prime_outputs
+        return np.array(outputs)
 
 
 if __name__ == '__main__':
