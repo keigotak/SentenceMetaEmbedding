@@ -39,8 +39,8 @@ class TrainSeq2seqWithSTSBenchmark:
         self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=0.2)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
-        self.weight_decay = 0.0001
-        self.lambda_e, self.lambda_d = 0.0001, 0.0001
+        self.weight_decay = 0.0005
+        self.lambda_e, self.lambda_d = 0.001, 0.001
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
 
