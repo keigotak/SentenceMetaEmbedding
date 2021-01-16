@@ -187,12 +187,12 @@ class TrainAttentionWithSTSBenchmark:
 class EvaluateAttentionModel(AbstructGetSentenceEmbedding):
     def __init__(self):
         super().__init__()
-        self.model_tag = ['attention']
         self.model_names = ['bert-base-uncased', 'roberta-base']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
         self.model = TrainAttentionWithSTSBenchmark()
+        self.model_tag = [f'attention-{self.model.attention_output_pooling_method}']
         self.output_file_name = 'attention_test.txt'
 
     def get_model(self):
