@@ -204,7 +204,7 @@ class TrainVectorAttentionWithSTSBenchmark:
         torch.save(self.vector_attention, self.get_save_path('vector'))
 
     def load_model(self):
-        if not os.path.exists(self.save_model_path):
+        if not os.path.exists(self.get_save_path('vector')):
             pass
         else:
             self.vector_attention = torch.load(self.get_save_path('vector'))
