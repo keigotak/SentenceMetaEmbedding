@@ -19,6 +19,7 @@ class ValueWatcher:
             self.current = val
             self.max_score = val
             self.min_score = val
+            self.is_new = True
         else:
             self.current = val
             self.is_new = False
