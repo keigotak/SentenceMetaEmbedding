@@ -27,8 +27,10 @@ class TrainVectorAttentionWithSTSBenchmark:
         self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
         self.source_pooling_method = 'avg'
         self.sentence_pooling_method = 'avg'
-        self.vector_attention = {model: torch.FloatTensor(self.source[model].model.embeddings.word_embeddings.embedding_dim).uniform_().requires_grad_(True) for model in self.model_names}
-        self.learning_ratio = 0.01
+        self.vector_attention = {model: torch.FloatTensor(self.source[model].model.embeddings.word_embeddings.embedding_dim).uniform_().requires_grad_(False) for model in self.model_names}
+        self.vector_attention = {model: self.vector_attention[model] / sum(self.vector_attention[model]) for model in self.model_names}
+        self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
+        self.learning_ratio = 0.1
         self.gradient_clip = 0.2
         self.weight_decay = 0.0001
         self.parameters = list(self.vector_attention.values())
@@ -67,7 +69,7 @@ class TrainVectorAttentionWithSTSBenchmark:
                     feature = {model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names}
                     word_embeddings = {model_name: torch.einsum('pq, r->pr', feature[model_name], self.vector_attention[model_name]) for model_name in self.model_names}
 
-                    # merge source embedding with vector attention
+                    # multiple source embedding and vector attention
                     if self.source_pooling_method == 'avg':
                         pooled_word_embeddings = []
                         for j in range(word_embeddings[model_name].shape[0]):
@@ -91,7 +93,7 @@ class TrainVectorAttentionWithSTSBenchmark:
 
                     sentence_embeddings.append(pooled_sentence_embedding)
 
-                loss = (torch.dot(sentence_embeddings[0].squeeze(0), sentence_embeddings[1].squeeze(0)) - score) ** 2
+                loss = (torch.dot(*sentence_embeddings) - score) ** 2
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
                 self.optimizer.step()
