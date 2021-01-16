@@ -40,6 +40,62 @@ class TrainVectorAttentionWithSTSBenchmark:
 
         self.save_model_path = '../models/vec_attention.pkl'
 
+    def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
+        running_loss = 0.0
+        if with_training:
+            self.optimizer.zero_grad()
+
+        gs_scores, sys_scores = [], []
+        for embeddings, score in zip(batch_embeddings, scores):
+            sentence_embeddings = []
+            for i in range(2):  # for input sentences, sentence1 and sentence2
+                pooled_sentence_embedding = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names})
+                sentence_embeddings.append(pooled_sentence_embedding)
+
+            loss = (torch.dot(*sentence_embeddings) - score) ** 2
+            if with_training:
+                loss.backward()
+                nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
+                self.optimizer.step()
+
+            if with_calc_similality:
+                sys_score = self.similarity(sentence_embeddings[0].tolist(), sentence_embeddings[1].tolist())
+                sys_scores.append(sys_score)
+                gs_scores.append(score)
+
+            running_loss += loss.item()
+
+        return gs_scores, sys_scores, running_loss
+
+    def step(self, feature):
+        word_embeddings = {
+            model_name: torch.einsum('pq, r->pr', feature[model_name], self.vector_attention[model_name]) for
+            model_name in self.model_names}
+
+        # multiple source embedding and vector attention
+        if self.source_pooling_method == 'avg':
+            pooled_word_embeddings = []
+            for j in range(word_embeddings[self.model_names[0]].shape[0]):
+                pooled_word_embedding = []
+                for model_name in self.model_names:
+                    pooled_word_embedding.append(word_embeddings[model_name][j])
+                pooled_word_embeddings.append(torch.mean(torch.stack(pooled_word_embedding), dim=0))
+        elif self.source_pooling_method == 'concat':
+            pooled_word_embeddings = []
+            for j in range(word_embeddings[self.model_names[0]].shape[0]):
+                pooled_word_embedding = []
+                for model_name in self.model_names:
+                    pooled_word_embedding.append(word_embeddings[model_name][j])
+                pooled_word_embeddings.append(torch.cat(pooled_word_embedding, dim=0))
+
+        # aggregate word embeddings to sentence embedding
+        if self.sentence_pooling_method == 'avg':
+            pooled_sentence_embedding = torch.mean(torch.stack(pooled_word_embeddings), dim=0)
+        elif self.sentence_pooling_method == 'max':
+            pooled_sentence_embedding = torch.max(torch.stack(pooled_word_embeddings), dim=0)
+
+        return pooled_sentence_embedding
+
     def train_epoch(self, with_pbar=False):
         mode = 'train'
         if with_pbar:
@@ -61,44 +117,7 @@ class TrainVectorAttentionWithSTSBenchmark:
                         embeddings[model_name] = rets['embeddings']
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
 
-            running_loss = 0.0
-            self.optimizer.zero_grad()
-            for embeddings, score in zip(batch_embeddings, scores):
-                sentence_embeddings = []
-                for i in range(2):  # for input sentences, sentence1 and sentence2
-                    feature = {model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names}
-                    word_embeddings = {model_name: torch.einsum('pq, r->pr', feature[model_name], self.vector_attention[model_name]) for model_name in self.model_names}
-
-                    # multiple source embedding and vector attention
-                    if self.source_pooling_method == 'avg':
-                        pooled_word_embeddings = []
-                        for j in range(word_embeddings[model_name].shape[0]):
-                            pooled_word_embedding = []
-                            for model_name in self.model_names:
-                                pooled_word_embedding.append(word_embeddings[model_name][j])
-                            pooled_word_embeddings.append(torch.mean(torch.stack(pooled_word_embedding), dim=0))
-                    elif self.source_pooling_method == 'concat':
-                        pooled_word_embeddings = []
-                        for j in range(word_embeddings[model_name].shape[0]):
-                            pooled_word_embedding = []
-                            for model_name in self.model_names:
-                                pooled_word_embedding.append(word_embeddings[model_name][j])
-                            pooled_word_embeddings.append(torch.cat(pooled_word_embedding, dim=0))
-
-                    # aggregate word embeddings to sentence embedding
-                    if self.sentence_pooling_method == 'avg':
-                        pooled_sentence_embedding = torch.mean(torch.stack(pooled_word_embeddings), dim=0)
-                    elif self.sentence_pooling_method == 'max':
-                        pooled_sentence_embedding = torch.max(torch.stack(pooled_word_embeddings), dim=0)
-
-                    sentence_embeddings.append(pooled_sentence_embedding)
-
-                loss = (torch.dot(*sentence_embeddings) - score) ** 2
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
-                self.optimizer.step()
-
-                running_loss += loss.item()
+            _, _, _ =self.batch_step(batch_embeddings, scores, with_training=True)
 
             if with_pbar:
                 pbar.update(self.datasets[mode].batch_size)
@@ -138,48 +157,10 @@ class TrainVectorAttentionWithSTSBenchmark:
                         embeddings[model_name] = rets['embeddings']
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
 
-                running_loss = 0.0
-                self.optimizer.zero_grad()
-                for embeddings, score in zip(batch_embeddings, scores):
-                    sentence_embeddings = []
-                    for i in range(2):  # for input sentences, sentence1 and sentence2
-                        feature = {model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in
-                                   self.model_names}
-                        word_embeddings = {model_name: torch.einsum('pq, r->pr', feature[model_name],
-                                                                    self.vector_attention[model_name]) for model_name in
-                                           self.model_names}
-
-                        # merge source embedding with vector attention
-                        if self.source_pooling_method == 'avg':
-                            pooled_word_embeddings = []
-                            for j in range(word_embeddings[model_name].shape[0]):
-                                pooled_word_embedding = []
-                                for model_name in self.model_names:
-                                    pooled_word_embedding.append(word_embeddings[model_name][j])
-                                pooled_word_embeddings.append(torch.mean(torch.stack(pooled_word_embedding), dim=0))
-                        elif self.source_pooling_method == 'concat':
-                            pooled_word_embeddings = []
-                            for j in range(word_embeddings[model_name].shape[0]):
-                                pooled_word_embedding = []
-                                for model_name in self.model_names:
-                                    pooled_word_embedding.append(word_embeddings[model_name][j])
-                                pooled_word_embeddings.append(torch.cat(pooled_word_embedding, dim=0))
-
-                        # aggregate word embeddings to sentence embedding
-                        if self.sentence_pooling_method == 'avg':
-                            pooled_sentence_embedding = torch.mean(torch.stack(pooled_word_embeddings), dim=0)
-                        elif self.sentence_pooling_method == 'max':
-                            pooled_sentence_embedding = torch.max(torch.stack(pooled_word_embeddings), dim=0)
-
-                        sentence_embeddings.append(pooled_sentence_embedding)
-
-                    loss = (torch.dot(sentence_embeddings[0], sentence_embeddings[1]) - score) ** 2
-
-                    running_loss += loss.item()
-
-                    sys_score = self.similarity(sentence_embeddings[0].tolist(), sentence_embeddings[1].tolist())
-                    sys_scores.append(sys_score)
-                    gs_scores.append(score)
+                gs, sys, loss = self.batch_step(batch_embeddings, scores, with_training=False)
+                sys_scores.extend(sys)
+                gs_scores.extend(gs)
+                running_loss += loss
 
         results = {'pearson': pearsonr(sys_scores, gs_scores),
                    'spearman': spearmanr(sys_scores, gs_scores),
@@ -240,40 +221,13 @@ class EvaluateVectorAttentionModel(AbstructGetSentenceEmbedding):
                     embeddings[model_name] = rets['embeddings'][0]
 
                 running_loss = 0.0
+                sentence_embeddings = []
                 for embeddings, score in zip(batch_embeddings, scores):
-                    sentence_embeddings = []
-                    for i in range(2):  # for input sentences, sentence1 and sentence2
-                        feature = {model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in
-                                   self.model_names}
-                        word_embeddings = {model_name: torch.einsum('pq, r->pr', feature[model_name],
-                                                                    self.model.vector_attention[model_name]) for model_name in
-                                           self.model_names}
+                    sentence_embedding = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
+                                   self.model_names})
+                    sentence_embeddings.append(sentence_embedding)
 
-                        # merge source embedding with vector attention
-                        if self.model.source_pooling_method == 'avg':
-                            pooled_word_embeddings = []
-                            for j in range(word_embeddings[model_name].shape[0]):
-                                pooled_word_embedding = []
-                                for model_name in self.model_names:
-                                    pooled_word_embedding.append(word_embeddings[model_name][j])
-                                pooled_word_embeddings.append(torch.mean(torch.stack(pooled_word_embedding), dim=0))
-                        elif self.model.source_pooling_method == 'concat':
-                            pooled_word_embeddings = []
-                            for j in range(word_embeddings[model_name].shape[0]):
-                                pooled_word_embedding = []
-                                for model_name in self.model_names:
-                                    pooled_word_embedding.append(word_embeddings[model_name][j])
-                                pooled_word_embeddings.append(torch.cat(pooled_word_embedding, dim=0))
-
-                        # aggregate word embeddings to sentence embedding
-                        if self.model.sentence_pooling_method == 'avg':
-                            pooled_sentence_embedding = torch.mean(torch.stack(pooled_word_embeddings), dim=0)
-                        elif self.model.sentence_pooling_method == 'max':
-                            pooled_sentence_embedding = torch.max(torch.stack(pooled_word_embeddings), dim=0)
-
-                        sentence_embeddings.append(pooled_sentence_embedding)
-
-        return np.array(attention_outputs)
+        return np.array(sentence_embeddings)
 
 
 if __name__ == '__main__':
