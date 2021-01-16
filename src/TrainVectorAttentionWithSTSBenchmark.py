@@ -207,7 +207,7 @@ class TrainVectorAttentionWithSTSBenchmark:
         if not os.path.exists(self.save_model_path):
             pass
         else:
-            self.attention.load_state_dict(torch.load(self.save_model_path))
+            self.vector_attention = torch.load(self.get_save_path('vector'))
 
     def get_round_score(self, score):
         return Decimal(str(score * 100)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
