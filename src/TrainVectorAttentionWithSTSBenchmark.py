@@ -157,7 +157,7 @@ class TrainVectorAttentionWithSTSBenchmark:
                         embeddings[model_name] = rets['embeddings']
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
 
-                gs, sys, loss = self.batch_step(batch_embeddings, scores, with_training=False)
+                gs, sys, loss = self.batch_step(batch_embeddings, scores, with_calc_similality=True)
                 sys_scores.extend(sys)
                 gs_scores.extend(gs)
                 running_loss += loss
@@ -203,7 +203,7 @@ class EvaluateVectorAttentionModel(AbstructGetSentenceEmbedding):
         self.with_save_embeddings = False
         self.model = TrainVectorAttentionWithSTSBenchmark()
         self.model_tag = [f'vec_attention-{self.model.source_pooling_method}-{self.model.sentence_pooling_method}']
-        self.output_file_name = 'vec_attention_test.txt'
+        self.output_file_name = 'vec_attention.txt'
 
     def get_model(self):
         return self.model
@@ -220,12 +220,9 @@ class EvaluateVectorAttentionModel(AbstructGetSentenceEmbedding):
                     rets = self.model.source[model_name].get_word_embedding(' '.join(sentence))
                     embeddings[model_name] = rets['embeddings'][0]
 
-                running_loss = 0.0
-                sentence_embeddings = []
-                for embeddings, score in zip(batch_embeddings, scores):
-                    sentence_embedding = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
-                                   self.model_names})
-                    sentence_embeddings.append(sentence_embedding)
+                sentence_embedding = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
+                               self.model_names})
+                sentence_embeddings.append(sentence_embedding)
 
         return np.array(sentence_embeddings)
 

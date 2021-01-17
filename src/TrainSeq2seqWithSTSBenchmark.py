@@ -47,7 +47,90 @@ class TrainSeq2seqWithSTSBenchmark:
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
 
         self.save_model_path = '../models/seq2seq.pkl'
-        self.output_by = 'decoder'
+        self.which_prime_output_to_use_in_testing = 'decoder'
+
+    def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
+        running_loss = 0.0
+        if with_training:
+            self.optimizer.zero_grad()
+
+        gs_scores, sys_scores = [], []
+        for embeddings, score in zip(batch_embeddings, scores):
+            attention_outputs, attention_weights, normalized_outputs = [], [], []
+            for i in range(2):  # for input sentences, sentence1 and sentence2
+                fe_prime, fd_prime = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for
+                    model_name in self.model_names})
+
+                ## calculate loss
+                target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name][i]) for
+                    model_name in self.model_names}
+                ld_2norm = torch.norm(target_embeddings[self.model_names[self.get_decoder_model_idx()]] - fd_prime, dim=1)
+                le_2norm = torch.norm(target_embeddings[self.model_names[self.get_encoder_model_idx()]] - fe_prime, dim=1)
+
+                ld_2norm_square = torch.square(ld_2norm)
+                le_2norm_square = torch.square(le_2norm)
+
+                ld = torch.sum(ld_2norm_square, dim=0)
+                le = torch.sum(le_2norm_square, dim=0)
+
+                we = self.projection_matrices[self.model_names[self.get_encoder_model_idx()]]
+                l_we = torch.square(
+                    torch.norm(torch.einsum('pq, rs->qr', we, we.T) - torch.eye(self.meta_embedding_dim)))
+                wd = self.projection_matrices[self.model_names[self.get_decoder_model_idx()]]
+                l_wd = torch.square(
+                    torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
+
+                loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
+
+                if with_training:
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
+                    self.optimizer.step()
+
+                running_loss += loss.item()
+
+            if with_calc_similality:
+                if self.which_prime_output_to_use_in_testing == 'encoder':
+                    sys_score = self.similarity(fe_prime_outputs[0].tolist(), fe_prime_outputs[1].tolist())
+                else:
+                    sys_score = self.similarity(fd_prime_outputs[0].tolist(), fd_prime_outputs[1].tolist())
+
+                sys_scores.append(sys_score)
+                gs_scores.append(score)
+
+        return gs_scores, sys_scores, running_loss
+
+    def step(self, feature):
+        # dim: sentence length, meta embedding dim
+        projected_feature = [
+            torch.matmul(torch.FloatTensor(feature[model_name]), self.projection_matrices[model_name]) for
+            model_name in self.model_names]
+
+        # dim: sentence length, meta embedding dim
+        nonlineared_feature = self.nonlinear(projected_feature[0] + projected_feature[1])
+        # dim: sentence length
+        projected_feature = torch.einsum('p, qr->q', self.parameter_vector, nonlineared_feature)
+        projected_feature = projected_feature.view(-1, 1, 1)
+
+        # feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
+        attention_score, attention_weight = self.attention(projected_feature, projected_feature, projected_feature)
+        attention_score = attention_score.view(-1, 1)
+
+        target_embeddings = {model_name: torch.FloatTensor(feature[model_name]) for model_name in
+                             self.model_names}
+
+        # dim: sentence length, source embedding dim
+        fd_prime = torch.einsum('pq, pr->pr', attention_score,
+                                target_embeddings[self.model_names[self.get_encoder_model_idx()]])
+        fe_prime = torch.einsum('pq, pr->pr', attention_score,
+                                target_embeddings[self.model_names[self.get_decoder_model_idx()]])
+        return fe_prime, fd_prime
+
+    def get_encoder_model_idx(self):
+        return 0
+
+    def get_decoder_model_idx(self):
+        return 1
 
     def train_epoch(self, with_pbar=False):
         mode = 'train'
@@ -71,61 +154,15 @@ class TrainSeq2seqWithSTSBenchmark:
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
 
             ## get attention output
-            running_loss = 0.0
-            self.optimizer.zero_grad()
-            for embeddings, score in zip(batch_embeddings, scores):
-                attention_outputs, attention_weights, normalized_outputs = [], [], []
-                for i in range(2):   # for input sentences, sentence1 and sentence2
-                    # dim: sentence length, input dim
-                    projected_feature = [torch.matmul(torch.FloatTensor(embeddings[model_name][i]), self.projection_matrices[model_name]) for model_name in self.model_names]
-                    # dim: sentence length, meta embedding dim
-                    nonlineared_feature = self.nonlinear(projected_feature[0] + projected_feature[1])
-                    # dim: sentence length
-                    feature = torch.einsum('p, qr->q', self.parameter_vector, nonlineared_feature)
-                    feature = feature.view(-1, 1, 1)
-
-                    # feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
-                    attention_score, attention_weight = self.attention(feature, feature, feature)
-                    attention_score = attention_score.view(-1, 1)
-
-                    target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names}
-                    encoder_model_idx = 0
-                    decoder_model_idx = 1
-
-                    # dim: sentence length, source embedding dim
-                    fd_prime = torch.einsum('pq, pr->pr', attention_score, target_embeddings[self.model_names[encoder_model_idx]])
-                    fe_prime = torch.einsum('pq, pr->pr', attention_score, target_embeddings[self.model_names[decoder_model_idx]])
-
-                    ## calculate loss
-                    ld_2norm = torch.norm(target_embeddings[self.model_names[decoder_model_idx]] - fd_prime, dim=1)
-                    le_2norm = torch.norm(target_embeddings[self.model_names[encoder_model_idx]] - fe_prime, dim=1)
-
-                    ld_2norm_square = torch.square(ld_2norm)
-                    le_2norm_square = torch.square(le_2norm)
-
-                    ld = torch.sum(ld_2norm_square, dim=0)
-                    le = torch.sum(le_2norm_square, dim=0)
-
-                    we = self.projection_matrices[self.model_names[encoder_model_idx]]
-                    l_we = torch.square(torch.norm(torch.einsum('pq, rs->qr', we, we.T) - torch.eye(self.meta_embedding_dim)))
-                    wd = self.projection_matrices[self.model_names[decoder_model_idx]]
-                    l_wd = torch.square(torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
-
-                    loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
-
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
-                    self.optimizer.step()
-
-                    running_loss += loss.item()
-
-                if with_pbar:
-                    pbar.update(self.datasets[mode].batch_size)
-
-                # print(str(self.datasets[mode]) + f' loss: {running_loss}')
+            _, _, _ = self.batch_step(batch_embeddings, scores, with_training=True)
 
             if with_pbar:
-                pbar.close()
+                pbar.update(self.datasets[mode].batch_size)
+
+            # print(str(self.datasets[mode]) + f' loss: {running_loss}')
+
+        if with_pbar:
+            pbar.close()
 
     def train(self, num_epoch=10):
         vw = ValueWatcher()
@@ -160,76 +197,10 @@ class TrainSeq2seqWithSTSBenchmark:
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
 
                 ## get attention output
-                running_loss = 0.0
-                self.optimizer.zero_grad()
-                for embeddings, score in zip(batch_embeddings, scores):
-                    fe_prime_outputs, fd_prime_outputs = [], []
-                    for i in range(2):  # for input sentences, sentence1 and sentence2
-                        # dim: sentence length, input dim
-                        projected_feature = [torch.matmul(torch.FloatTensor(embeddings[model_name][i]),
-                                                          self.projection_matrices[model_name]) for model_name in
-                                             self.model_names]
-                        # dim: sentence length, meta embedding dim
-                        nonlineared_feature = self.nonlinear(projected_feature[0] + projected_feature[1])
-                        # dim: sentence length
-                        feature = torch.einsum('p, qr->q', self.parameter_vector, nonlineared_feature)
-                        feature = feature.view(-1, 1, 1)
-
-                        # feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
-                        attention_score, attention_weight = self.attention(feature, feature, feature)
-                        attention_score = attention_score.view(-1, 1)
-
-                        target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in
-                                             self.model_names}
-                        encoder_model_idx = 0
-                        decoder_model_idx = 1
-
-                        # dim: sentence length, source embedding dim
-                        fe_prime = torch.einsum('pq, pr->pr', attention_score,
-                                                target_embeddings[self.model_names[decoder_model_idx]])
-                        fd_prime = torch.einsum('pq, pr->pr', attention_score,
-                                                target_embeddings[self.model_names[encoder_model_idx]])
-
-                        if self.attention_output_pooling_method == 'avg':
-                            pooled_fe_prime = torch.mean(fe_prime, dim=0)
-                            pooled_fd_prime = torch.mean(fd_prime, dim=0)
-                        elif self.attention_output_pooling_method == 'concat':
-                            pooled_fe_prime = torch.cat([out for out in fe_prime])
-                            pooled_fd_prime = torch.cat([out for out in fd_prime])
-                        elif self.attention_output_pooling_method == 'max':
-                            pooled_fe_prime = torch.max(fe_prime, dim=0)
-                            pooled_fd_prime = torch.max(fd_prime, dim=0)
-                        fe_prime_outputs.append(pooled_fe_prime)
-                        fd_prime_outputs.append(pooled_fd_prime)
-
-                        ## calculate loss
-                        le_2norm = torch.norm(target_embeddings[self.model_names[encoder_model_idx]] - fe_prime, dim=1)
-                        ld_2norm = torch.norm(target_embeddings[self.model_names[decoder_model_idx]] - fd_prime, dim=1)
-
-                        le_2norm_square = torch.square(le_2norm)
-                        ld_2norm_square = torch.square(ld_2norm)
-
-                        le = torch.sum(le_2norm_square, dim=0)
-                        ld = torch.sum(ld_2norm_square, dim=0)
-
-                        we = self.projection_matrices[self.model_names[encoder_model_idx]]
-                        l_we = torch.square(
-                            torch.norm(torch.einsum('pq, rs->qr', we, we.T) - torch.eye(self.meta_embedding_dim)))
-                        wd = self.projection_matrices[self.model_names[decoder_model_idx]]
-                        l_wd = torch.square(
-                            torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
-
-                        loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
-
-                        running_loss += loss.item()
-
-                    if self.output_by == 'encoder':
-                        sys_score = self.similarity(fe_prime_outputs[0].tolist(), fe_prime_outputs[1].tolist())
-                    else:
-                        sys_score = self.similarity(fd_prime_outputs[0].tolist(), fd_prime_outputs[1].tolist())
-
-                    sys_scores.append(sys_score)
-                    gs_scores.append(score)
+                gs, sys, loss = self.batch_step(batch_embeddings, scores, with_calc_similality=True)
+                sys_scores.extend(sys)
+                gs_scores.extend(gs)
+                running_loss += loss
 
         results = {'pearson': pearsonr(sys_scores, gs_scores),
                    'spearman': spearmanr(sys_scores, gs_scores),
@@ -298,29 +269,8 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                     embeddings[model_name] = rets['embeddings'][0]
 
                 # dim: sentence length, input dim
-                projected_feature = [torch.matmul(torch.FloatTensor(embeddings[model_name]),
-                                                  self.model.projection_matrices[model_name]) for model_name in
-                                     self.model_names]
-                # dim: sentence length, meta embedding dim
-                nonlineared_feature = self.model.nonlinear(projected_feature[0] + projected_feature[1])
-                # dim: sentence length
-                feature = torch.einsum('p, qr->q', self.model.parameter_vector, nonlineared_feature)
-                feature = feature.view(-1, 1, 1)
-
-                # feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
-                attention_score, attention_weight = self.model.attention(feature, feature, feature)
-                attention_score = attention_score.view(-1, 1)
-
-                target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
-                                     self.model_names}
-                encoder_model_idx = 0
-                decoder_model_idx = 1
-
-                # dim: sentence length, source embedding dim
-                fe_prime = torch.einsum('pq, pr->pr', attention_score,
-                                        target_embeddings[self.model_names[decoder_model_idx]])
-                fd_prime = torch.einsum('pq, pr->pr', attention_score,
-                                        target_embeddings[self.model_names[encoder_model_idx]])
+                fe_prime, fd_prime = self.model.step({model_name: torch.FloatTensor(embeddings[model_name])
+                                                      for model_name in self.model_names})
 
                 if self.model.attention_output_pooling_method == 'avg':
                     pooled_fe_prime = torch.mean(fe_prime, dim=0)
