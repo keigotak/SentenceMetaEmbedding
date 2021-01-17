@@ -251,7 +251,7 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
         self.with_save_embeddings = False
         self.model = TrainSeq2seqWithSTSBenchmark()
         self.output_file_name = 'seq2seq_test.txt'
-        self.output_by = self.model.output_by
+        self.which_prime_output_to_use_in_testing = self.model.which_prime_output_to_use_in_testing
 
     def get_model(self):
         return self.model
@@ -285,7 +285,7 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                 fe_prime_outputs.append(pooled_fe_prime.tolist())
                 fd_prime_outputs.append(pooled_fd_prime.tolist())
 
-        if self.output_by == 'encoder':
+        if self.which_prime_output_to_use_in_testing == 'encoder':
             outputs = fe_prime_outputs
         else:
             outputs = fd_prime_outputs
