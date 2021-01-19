@@ -9,13 +9,50 @@ class GetHuggingfaceWordEmbedding:
         self.model_name = model_name
         self.model = AutoModel.from_pretrained(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenization_mode = 'subword'
+        self.subword_pooling_method = 'avg'
 
     def get_ids(self, sent):
         ids_sent = self.tokenizer(sent, return_tensors="pt")
-        ids_sent.data['input_ids'] = torch.LongTensor(self.tokenizer.convert_tokens_to_ids([self.tokenizer.cls_token] + sent.split(' ') + [self.tokenizer.sep_token])).unsqueeze(0)
-        ids_sent.data['token_type_ids'] = torch.zeros_like(ids_sent.data['input_ids'])
-        ids_sent.data['attention_mask'] = torch.ones_like(ids_sent.data['input_ids'])
+        if self.tokenization_mode == 'original':
+            ids_sent.data['input_ids'] = torch.LongTensor(self.tokenizer.convert_tokens_to_ids([self.tokenizer.cls_token] + sent.split(' ') + [self.tokenizer.sep_token])).unsqueeze(0)
+            ids_sent.data['token_type_ids'] = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
+            ids_sent.data['attention_mask'] = torch.ones_like(ids_sent.data['input_ids'])
         return ids_sent
+
+    def process_subword(self, sent, embeddings):
+        words = sent.split(" ")
+        subword_list, subword_tokens = [], []
+        sequence_index = 0
+
+        # detect subwords
+        for i, word in enumerate(words):
+            if i != 0 and self.model_name in {'roberta-base'}:
+                word = ' ' + word
+            token = self.tokenizer(word, return_tensors="pt")
+            subword_list.extend([sequence_index] * len(token.data['input_ids'][0][1:-1]))
+            subword_tokens.append(self.tokenizer.convert_ids_to_tokens(token.data['input_ids'][0][1:-1]))
+            sequence_index += 1
+        subword_list = [-1] + subword_list + [sequence_index]
+
+        # aggregate subwords embeddings
+        subword_aggregated_embeddings = []
+        for i in range(-1, sequence_index + 1):
+            subword_positions = [j for j, x in enumerate(subword_list) if x == i]
+            # if the word are subworded
+            if len(subword_positions) > 1:
+                subword_embeddings = []
+                for subword_position in subword_positions:
+                    subword_embeddings.append(embeddings[subword_position])
+                # subword pooling
+                if self.subword_pooling_method == 'avg':
+                    pooled_subword_embedding = torch.mean(torch.stack(subword_embeddings), dim=0)
+                elif self.subword_pooling_method == 'max':
+                    pooled_subword_embedding = torch.max(torch.stack(subword_embeddings), dim=0)[0]
+                subword_aggregated_embeddings.append(pooled_subword_embedding)
+            else:
+                subword_aggregated_embeddings.append(embeddings[subword_positions[0]])
+        return torch.stack(subword_aggregated_embeddings, dim=0)
 
     def get_word_embeddings(self, sent1, sent2):
         ids_sent1 = self.get_ids(sent1)
@@ -26,9 +63,13 @@ class GetHuggingfaceWordEmbedding:
         tokens_sent2 = self.tokenizer.convert_ids_to_tokens(ids_sent2.data['input_ids'][0])
         tokens = [tokens_sent1, tokens_sent2]
 
-        emb_sent1 = self.model(**ids_sent1)
-        emb_sent2 = self.model(**ids_sent2)
-        embedding = [emb_sent1[0].squeeze(0).tolist(), emb_sent2[0].squeeze(0).tolist()]
+        emb_sent1, last_hidden1 = self.model(**ids_sent1)
+        emb_sent2, last_hidden2 = self.model(**ids_sent2)
+        if self.tokenization_mode == 'subword':
+            emb_sent1 = self.process_subword(sent1, emb_sent1.squeeze(0))
+            emb_sent2 = self.process_subword(sent2, emb_sent2.squeeze(0))
+
+        embedding = [emb_sent1.squeeze(0).tolist(), emb_sent2.squeeze(0).tolist()]
 
         return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
 
@@ -56,7 +97,7 @@ class GetHaggingfaceEmbedding(AbstructGetSentenceEmbedding):
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.mode = 'mean'
+        self.mode = 'avg'
 
     def get_model(self):
         self.model = AutoModel.from_pretrained(self.model_name)
@@ -72,9 +113,12 @@ class GetHaggingfaceEmbedding(AbstructGetSentenceEmbedding):
         for sentence in batch:
             indexes = self.tokenizer(' '.join(sentence), return_tensors="pt")
             sentence_embedding = self.model(**indexes)[0].squeeze(0)
-            if self.mode == 'mean':
+            if self.mode == 'avg':
                 sentence_embedding = sentence_embedding[1:-1]
                 sentence_embedding = torch.mean(sentence_embedding, dim=0)
+            elif self.mode == 'concat':
+                sentence_embedding = sentence_embedding[1:-1]
+                sentence_embedding = torch.cat(sentence_embedding, dim=0)
             elif self.mode == 'cls':
                 sentence_embedding = sentence_embedding[0]
             sentence_embeddings.append(sentence_embedding.tolist())  # get sentence embeddings
@@ -85,7 +129,7 @@ class GetHaggingfaceEmbedding(AbstructGetSentenceEmbedding):
 if __name__ == '__main__':
     cls = GetHaggingfaceEmbedding()
     for model_name in cls.model_names:
-        print(model_name)
+        print(f'{model_name}-{cls.model.mode}-{cls.model.tokenization_mode}')
         cls.set_model(model_name)
         cls.single_eval(model_name)
         if cls.with_reset_output_file:

@@ -15,7 +15,7 @@ from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstructGetSentenceEmbedding import *
 from ValueWatcher import ValueWatcher
 from DataPooler import DataPooler
-from HelperFunctions import set_seed
+from HelperFunctions import set_seed, get_now
 
 
 class TrainSeq2seqWithSTSBenchmark:
@@ -34,9 +34,12 @@ class TrainSeq2seqWithSTSBenchmark:
         self.nonlinear = nn.ReLU()
         self.parameter_vector = torch.randn(self.meta_embedding_dim)
 
+        self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
+        self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
         self.attention_head_num = 1
-        self.attention_output_pooling_method = 'avg'
-        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=0.2)
+        self.attention_dropout_ratio = 0.2
+        self.sentence_pooling_method = 'avg'
+        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
         self.weight_decay = 0.005
@@ -46,7 +49,8 @@ class TrainSeq2seqWithSTSBenchmark:
 
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
 
-        self.save_model_path = '../models/seq2seq.pkl'
+        self.tag = get_now()
+        self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
         self.which_prime_output_to_use_in_testing = 'decoder'
 
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
@@ -219,13 +223,14 @@ class TrainSeq2seqWithSTSBenchmark:
         return results
 
     def get_save_path(self, tag):
-        return f'../models/seq2seq-{tag}.pkl'
+        return f'../models/seq2seq-{self.tag}-{tag}.pkl'
 
     def save_model(self):
         for key, value in self.projection_matrices.items():
             torch.save(value, self.get_save_path('projection-' + key))
         torch.save(self.attention.state_dict(), self.get_save_path('attention'))
         torch.save(self.parameter_vector, self.get_save_path('param_vector'))
+        self.save_information_file()
 
     def load_model(self):
         if not os.path.exists(self.save_model_path):
@@ -236,21 +241,48 @@ class TrainSeq2seqWithSTSBenchmark:
             self.attention.load_state_dict(torch.load(self.get_save_path('attention')))
             self.parameter_vector = torch.load(self.get_save_path('param_vector'))
 
-
     def get_round_score(self, score):
         return Decimal(str(score * 100)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+
+    def save_information_file(self):
+        information_file = Path(self.information_file)
+        if not information_file.parent.exists():
+            information_file.parent.mkdir(exist_ok=True)
+
+        with information_file.open('w') as f:
+            f.write(f'source: {",".join(self.model_names)}\n')
+            f.write(f'meta_embedding_dim: {self.meta_embedding_dim}\n')
+            f.write(f'nonlinear: {str(self.nonlinear)}\n')
+            f.write(f'attention_head_num: {self.attention_head_num}\n')
+            f.write(f'attention_dropout_ratio: {self.dropout_ratio}\n')
+            f.write(f'tokenization_mode: {self.tokenization_mode}\n')
+            f.write(f'subword_pooling_method: {self.subword_pooling_method}\n')
+            f.write(f'source_pooling_method: {self.source_pooling_method}\n')
+            f.write(f'sentence_pooling_method: {self.sentence_pooling_method}\n')
+            f.write(f'learning_ratio: {self.learning_ratio}\n')
+            f.write(f'gradient_clip: {self.gradient_clip}\n')
+            f.write(f'weight_decay: {self.weight_decay}\n')
+            f.write(f'lambda_e: {self.lambda_e}\n')
+            f.write(f'lambda_d: {self.lambda_d}\n')
+
+    def set_tag(self, tag):
+        self.tag = tag
+        self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
+        self.information_file = f'../results/seq2seq/info-{self.tag}.txt'
 
 
 class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
     def __init__(self):
         super().__init__()
+        self.tag = get_now()
         self.model_tag = ['seq2seq']
         self.model_names = ['bert-base-uncased', 'roberta-base']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
         self.model = TrainSeq2seqWithSTSBenchmark()
-        self.output_file_name = 'seq2seq_test.txt'
+        self.model_tag = [f'seq2seq-{self.tag}']
+        self.output_file_name = 'seq2seq.txt'
         self.which_prime_output_to_use_in_testing = self.model.which_prime_output_to_use_in_testing
 
     def get_model(self):
@@ -272,13 +304,13 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                 fe_prime, fd_prime = self.model.step({model_name: torch.FloatTensor(embeddings[model_name])
                                                       for model_name in self.model_names})
 
-                if self.model.attention_output_pooling_method == 'avg':
+                if self.model.sentence_pooling_method == 'avg':
                     pooled_fe_prime = torch.mean(fe_prime, dim=0)
                     pooled_fd_prime = torch.mean(fd_prime, dim=0)
-                elif self.model.attention_output_pooling_method == 'concat':
+                elif self.model.sentence_pooling_method == 'concat':
                     pooled_fe_prime = torch.cat([out for out in fe_prime])
                     pooled_fd_prime = torch.cat([out for out in fd_prime])
-                elif self.model.attention_output_pooling_method == 'max':
+                elif self.model.sentence_pooling_method == 'max':
                     pooled_fe_prime = torch.max(fe_prime, dim=0)
                     pooled_fd_prime = torch.max(fd_prime, dim=0)
 
@@ -299,6 +331,10 @@ if __name__ == '__main__':
         vw = ValueWatcher()
         cls = EvaluateSeq2seqModel()
         trainer = TrainSeq2seqWithSTSBenchmark()
+
+        trainer.model_names = cls.model_names
+        trainer.set_tag(cls.tag)
+
         while not vw.is_over():
             print(f'epoch: {vw.epoch}')
             trainer.train_epoch()
