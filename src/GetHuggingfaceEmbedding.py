@@ -80,8 +80,10 @@ class GetHuggingfaceWordEmbedding:
         tokens_sent1 = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
         tokens = [tokens_sent1]
 
-        emb_sent1 = self.model(**ids_sent1)
-        embedding = [emb_sent1[0].squeeze(0).tolist()]
+        emb_sent1, last_hidden1 = self.model(**ids_sent1)
+        if self.tokenization_mode == 'subword':
+            emb_sent1 = self.process_subword(sentence, emb_sent1.squeeze(0))
+        embedding = [emb_sent1.squeeze(0).tolist()]
 
         return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
 
