@@ -1,6 +1,7 @@
 import os
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -53,14 +54,14 @@ class TrainSeq2seqWithSTSBenchmark:
         self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
         self.which_prime_output_to_use_in_testing = 'decoder'
 
-    def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
+    def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=True):
         running_loss = 0.0
         if with_training:
             self.optimizer.zero_grad()
 
         gs_scores, sys_scores = [], []
         for embeddings, score in zip(batch_embeddings, scores):
-            attention_outputs, attention_weights, normalized_outputs = [], [], []
+            fe_prime_outputs, fd_prime_outputs = [], []
             for i in range(2):  # for input sentences, sentence1 and sentence2
                 fe_prime, fd_prime = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for
                     model_name in self.model_names})
@@ -92,6 +93,8 @@ class TrainSeq2seqWithSTSBenchmark:
                     self.optimizer.step()
 
                 running_loss += loss.item()
+                fe_prime_outputs.append(fe_prime)
+                fd_prime_outputs.append(fd_prime)
 
             if with_calc_similality:
                 if self.which_prime_output_to_use_in_testing == 'encoder':
@@ -128,7 +131,18 @@ class TrainSeq2seqWithSTSBenchmark:
                                 target_embeddings[self.model_names[self.get_encoder_model_idx()]])
         fe_prime = torch.einsum('pq, pr->pr', attention_score,
                                 target_embeddings[self.model_names[self.get_decoder_model_idx()]])
-        return fe_prime, fd_prime
+
+        if self.sentence_pooling_method == 'avg':
+            pooled_fe_prime = torch.mean(fe_prime, dim=0)
+            pooled_fd_prime = torch.mean(fd_prime, dim=0)
+        elif self.sentence_pooling_method == 'concat':
+            pooled_fe_prime = torch.cat([out for out in fe_prime])
+            pooled_fd_prime = torch.cat([out for out in fd_prime])
+        elif self.sentence_pooling_method == 'max':
+            pooled_fe_prime = torch.max(fe_prime, dim=0)
+            pooled_fd_prime = torch.max(fd_prime, dim=0)
+
+        return pooled_fe_prime, pooled_fd_prime
 
     def get_encoder_model_idx(self):
         return 0
@@ -244,6 +258,16 @@ class TrainSeq2seqWithSTSBenchmark:
     def get_round_score(self, score):
         return Decimal(str(score * 100)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
 
+    def append_information_file(self, results):
+        information_file = Path(self.information_file)
+        if not information_file.parent.exists():
+            information_file.parent.mkdir(exist_ok=True)
+
+        with information_file.open('a') as f:
+            for print_all_content in print_all_contents:
+                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
+                      file=f)
+
     def save_information_file(self):
         information_file = Path(self.information_file)
         if not information_file.parent.exists():
@@ -254,11 +278,11 @@ class TrainSeq2seqWithSTSBenchmark:
             f.write(f'meta_embedding_dim: {self.meta_embedding_dim}\n')
             f.write(f'nonlinear: {str(self.nonlinear)}\n')
             f.write(f'attention_head_num: {self.attention_head_num}\n')
-            f.write(f'attention_dropout_ratio: {self.dropout_ratio}\n')
+            f.write(f'attention_dropout_ratio: {self.attention_dropout_ratio}\n')
             f.write(f'tokenization_mode: {self.tokenization_mode}\n')
             f.write(f'subword_pooling_method: {self.subword_pooling_method}\n')
-            f.write(f'source_pooling_method: {self.source_pooling_method}\n')
             f.write(f'sentence_pooling_method: {self.sentence_pooling_method}\n')
+            f.write(f'which_prime_output_to_use_in_testing: {self.which_prime_output_to_use_in_testing}\n')
             f.write(f'learning_ratio: {self.learning_ratio}\n')
             f.write(f'gradient_clip: {self.gradient_clip}\n')
             f.write(f'weight_decay: {self.weight_decay}\n')
@@ -301,18 +325,8 @@ class EvaluateSeq2seqModel(AbstructGetSentenceEmbedding):
                     embeddings[model_name] = rets['embeddings'][0]
 
                 # dim: sentence length, input dim
-                fe_prime, fd_prime = self.model.step({model_name: torch.FloatTensor(embeddings[model_name])
+                pooled_fe_prime, pooled_fd_prime = self.model.step({model_name: torch.FloatTensor(embeddings[model_name])
                                                       for model_name in self.model_names})
-
-                if self.model.sentence_pooling_method == 'avg':
-                    pooled_fe_prime = torch.mean(fe_prime, dim=0)
-                    pooled_fd_prime = torch.mean(fd_prime, dim=0)
-                elif self.model.sentence_pooling_method == 'concat':
-                    pooled_fe_prime = torch.cat([out for out in fe_prime])
-                    pooled_fd_prime = torch.cat([out for out in fd_prime])
-                elif self.model.sentence_pooling_method == 'max':
-                    pooled_fe_prime = torch.max(fe_prime, dim=0)
-                    pooled_fd_prime = torch.max(fd_prime, dim=0)
 
                 fe_prime_outputs.append(pooled_fe_prime.tolist())
                 fd_prime_outputs.append(pooled_fd_prime.tolist())
@@ -352,7 +366,8 @@ if __name__ == '__main__':
         rets = trainer.inference(mode='test')
         print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
-        cls.single_eval(cls.model_tag[0])
+        rets = cls.single_eval(cls.model_tag[0])
+        trainer.append_information_file(rets)
     else:
         trainer = TrainSeq2seqWithSTSBenchmark()
         trainer.train()

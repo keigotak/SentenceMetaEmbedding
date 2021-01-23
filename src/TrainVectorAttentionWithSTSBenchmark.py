@@ -1,6 +1,7 @@
 import os
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -183,7 +184,7 @@ class TrainVectorAttentionWithSTSBenchmark:
         return results
 
     def get_save_path(self, tag):
-        return f'../models/vec_attention-{self.tag}-{}.pkl'
+        return f'../models/vec_attention-{self.tag}-{tag}.pkl'
 
     def save_model(self):
         torch.save(self.vector_attention, self.get_save_path('vector'))
@@ -197,6 +198,16 @@ class TrainVectorAttentionWithSTSBenchmark:
 
     def get_round_score(self, score):
         return Decimal(str(score * 100)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+
+    def append_information_file(self, results):
+        information_file = Path(self.information_file)
+        if not information_file.parent.exists():
+            information_file.parent.mkdir(exist_ok=True)
+
+        with information_file.open('a') as f:
+            for print_all_content in print_all_contents:
+                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
+                      file=f)
 
     def save_information_file(self):
         information_file = Path(self.information_file)
@@ -248,7 +259,7 @@ class EvaluateVectorAttentionModel(AbstructGetSentenceEmbedding):
 
                 sentence_embedding = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
                                self.model_names})
-                sentence_embeddings.append(sentence_embedding)
+                sentence_embeddings.append(sentence_embedding.tolist())
 
         return np.array(sentence_embeddings)
 
@@ -281,7 +292,8 @@ if __name__ == '__main__':
         rets = trainer.inference(mode='test')
         print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
-        cls.single_eval(cls.model_tag[0])
+        rets = cls.single_eval(cls.model_tag[0])
+        trainer.append_information_file(rets)
     else:
         trainer = TrainAttentionWithSTSBenchmark()
         trainer.train()

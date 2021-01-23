@@ -1,6 +1,7 @@
 import os
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -15,7 +16,7 @@ from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstructGetSentenceEmbedding import *
 from ValueWatcher import ValueWatcher
 from DataPooler import DataPooler
-from HelperFunctions import set_seed
+from HelperFunctions import set_seed, get_now
 
 
 class TrainAttentionWithSTSBenchmark:
@@ -70,7 +71,7 @@ class TrainAttentionWithSTSBenchmark:
                 self.optimizer.step()
 
             if with_calc_similality:
-                sys_score = self.similarity(sentence_embeddings[0].tolist(), sentence_embeddings[1].tolist())
+                sys_score = self.similarity(sentence_embeddings[0].squeeze(0).tolist(), sentence_embeddings[1].squeeze(0).tolist())
                 sys_scores.append(sys_score)
                 gs_scores.append(score)
 
@@ -196,6 +197,16 @@ class TrainAttentionWithSTSBenchmark:
     def get_round_score(self, score):
         return Decimal(str(score * 100)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
 
+    def append_information_file(self, results):
+        information_file = Path(self.information_file)
+        if not information_file.parent.exists():
+            information_file.parent.mkdir(exist_ok=True)
+
+        with information_file.open('a') as f:
+            for print_all_content in print_all_contents:
+                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
+                      file=f)
+
     def save_information_file(self):
         information_file = Path(self.information_file)
         if not information_file.parent.exists():
@@ -248,8 +259,8 @@ class EvaluateAttentionModel(AbstructGetSentenceEmbedding):
                     embeddings[model_name] = rets['embeddings'][0]
 
                 # get attention output
-                sentence_embedding, attention_weight = self.model.step({torch.FloatTensor(embeddings[model_name]) for model_name in self.model_names})
-                sentence_embeddings.append(sentence_embedding)
+                sentence_embedding, attention_weight = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in self.model_names})
+                sentence_embeddings.append(sentence_embedding.squeeze(0).tolist())
                 attention_weights.append(attention_weight)
 
         return np.array(sentence_embeddings)
@@ -283,7 +294,8 @@ if __name__ == '__main__':
         rets = trainer.inference(mode='test')
         print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
-        cls.single_eval(cls.model_tag[0])
+        rets = cls.single_eval(cls.model_tag[0])
+        trainer.append_information_file(rets)
     else:
         trainer = TrainAttentionWithSTSBenchmark()
         trainer.train()

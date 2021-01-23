@@ -90,6 +90,8 @@ class AbstructGetSentenceEmbedding:
             with open(f'../models/sentence_embeddings_{model_name}.pkl', 'wb') as f:
                 pickle.dump(self.embeddings[model_name], f)
 
+        return print_all_contents
+
 
 def prepare(params, samples):
     return
