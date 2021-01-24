@@ -42,7 +42,7 @@ class TrainSeq2seqWithSTSBenchmark:
         self.sentence_pooling_method = 'avg'
         self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio)
         self.learning_ratio = 0.01
-        self.gradient_clip = 0.2
+        self.gradient_clip = 0.3
         self.weight_decay = 0.005
         self.lambda_e, self.lambda_d = 0.001, 0.001
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
@@ -264,9 +264,7 @@ class TrainSeq2seqWithSTSBenchmark:
             information_file.parent.mkdir(exist_ok=True)
 
         with information_file.open('a') as f:
-            for print_all_content in print_all_contents:
-                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
-                      file=f)
+            f.write('\n'.join(results))
 
     def save_information_file(self):
         information_file = Path(self.information_file)

@@ -35,7 +35,7 @@ class TrainVectorAttentionWithSTSBenchmark:
         self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
         self.learning_ratio = 0.1
         self.gradient_clip = 0.2
-        self.weight_decay = 0.0001
+        self.weight_decay = 0.001
         self.parameters = list(self.vector_attention.values())
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
 
@@ -205,9 +205,7 @@ class TrainVectorAttentionWithSTSBenchmark:
             information_file.parent.mkdir(exist_ok=True)
 
         with information_file.open('a') as f:
-            for print_all_content in print_all_contents:
-                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
-                      file=f)
+            f.write('\n'.join(results))
 
     def save_information_file(self):
         information_file = Path(self.information_file)

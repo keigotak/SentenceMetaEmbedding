@@ -203,9 +203,7 @@ class TrainAttentionWithSTSBenchmark:
             information_file.parent.mkdir(exist_ok=True)
 
         with information_file.open('a') as f:
-            for print_all_content in print_all_contents:
-                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
-                      file=f)
+            f.write('\n'.join(results))
 
     def save_information_file(self):
         information_file = Path(self.information_file)
