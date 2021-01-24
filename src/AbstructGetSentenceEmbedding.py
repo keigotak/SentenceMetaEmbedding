@@ -71,10 +71,12 @@ class AbstructGetSentenceEmbedding:
             if os.path.exists(f'../results/{self.output_file_name}'):
                 os.remove(f'../results/{self.output_file_name}')
 
+        texts = []
         with open(f'../results/{self.output_file_name}', 'a') as f:
             for print_all_content in print_all_contents:
-                print(' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content),
-                      file=f)
+                text = ' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content)
+                print(text, file=f)
+                texts.append(text)
 
             if self.with_detailed_log:
                 print('', file=f)
@@ -90,7 +92,7 @@ class AbstructGetSentenceEmbedding:
             with open(f'../models/sentence_embeddings_{model_name}.pkl', 'wb') as f:
                 pickle.dump(self.embeddings[model_name], f)
 
-        return print_all_contents
+        return texts
 
 
 def prepare(params, samples):
