@@ -5,7 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import senteval
 
 
-class AbstructGetSentenceEmbedding:
+class AbstractGetSentenceEmbedding:
     def __init__(self):
         self.model_names = None
         self.embeddings = None

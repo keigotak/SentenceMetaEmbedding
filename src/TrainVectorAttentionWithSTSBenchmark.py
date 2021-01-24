@@ -12,7 +12,7 @@ from senteval.utils import cosine
 
 from STSDataset import STSDataset
 from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 from ValueWatcher import ValueWatcher
 from DataPooler import DataPooler
 from HelperFunctions import set_seed, get_now
@@ -227,7 +227,7 @@ class TrainVectorAttentionWithSTSBenchmark:
         self.information_file = f'../results/vec_attention/info-{self.tag}.txt'
 
 
-class EvaluateVectorAttentionModel(AbstructGetSentenceEmbedding):
+class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
     def __init__(self):
         super().__init__()
         self.tag = get_now()

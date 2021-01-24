@@ -8,7 +8,7 @@ from elmoformanylangs import Embedder
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules.elmo import Elmo, batch_to_ids
 
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 
 
 class ElmoModel:
@@ -61,7 +61,7 @@ class ElmoModel:
         return self.embedding.state_dict()
 
 
-class GetELMoSentenceEmbedding(AbstructGetSentenceEmbedding):
+class GetELMoSentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()

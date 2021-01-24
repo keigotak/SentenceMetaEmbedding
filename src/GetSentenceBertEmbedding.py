@@ -1,8 +1,8 @@
 from sentence_transformers import SentenceTransformer
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 
 
-class GetSentenceBertEmbedding(AbstructGetSentenceEmbedding):
+class GetSentenceBertEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "2"
         super().__init__()

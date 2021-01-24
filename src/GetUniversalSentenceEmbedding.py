@@ -1,10 +1,10 @@
 import numpy as np
 import tensorflow_hub as hub
 import tensorflow as tf
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 
 
-class GetUniversalSentenceEmbedding(AbstructGetSentenceEmbedding):
+class GetUniversalSentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()

@@ -1,10 +1,10 @@
 import pickle
 import os
 import numpy as np
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 
 
-class GetMetaSentenceEmbedding(AbstructGetSentenceEmbedding):
+class GetMetaSentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()

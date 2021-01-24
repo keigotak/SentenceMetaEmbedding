@@ -1,10 +1,10 @@
 import _pickle as cPickle
 from pathlib import Path
 from para_nmt_50m.eval import get_model
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 
 
-class GetParaNMTSentenceEmbedding(AbstructGetSentenceEmbedding):
+class GetParaNMTSentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
         super().__init__()

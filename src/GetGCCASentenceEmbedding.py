@@ -1,8 +1,8 @@
 import numpy as np
-from AbstructGetSentenceEmbedding import *
+from AbstractGetSentenceEmbedding import *
 
 
-class GetGCCASentenceEmbedding(AbstructGetSentenceEmbedding):
+class GetGCCASentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()
