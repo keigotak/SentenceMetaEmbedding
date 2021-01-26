@@ -50,7 +50,7 @@ class GetHuggingfaceWordEmbedding:
                 if self.subword_pooling_method == 'avg':
                     pooled_subword_embedding = torch.mean(torch.stack(subword_embeddings), dim=0)
                 elif self.subword_pooling_method == 'max':
-                    pooled_subword_embedding = torch.max(torch.stack(subword_embeddings), dim=0)[0]
+                    pooled_subword_embedding, _ = torch.max(torch.stack(subword_embeddings), dim=0)
                 subword_aggregated_embeddings.append(pooled_subword_embedding)
             else:
                 subword_aggregated_embeddings.append(embeddings[subword_positions[0]])
