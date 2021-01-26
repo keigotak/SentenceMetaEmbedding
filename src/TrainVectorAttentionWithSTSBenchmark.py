@@ -92,7 +92,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         if self.sentence_pooling_method == 'avg':
             pooled_sentence_embedding = torch.mean(torch.stack(pooled_word_embeddings), dim=0)
         elif self.sentence_pooling_method == 'max':
-            pooled_sentence_embedding = torch.max(torch.stack(pooled_word_embeddings), dim=0)
+            pooled_sentence_embedding, _ = torch.max(torch.stack(pooled_word_embeddings), dim=0)
 
         return pooled_sentence_embedding
 
@@ -112,7 +112,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
     def save_information_file(self):
         super().save_information_file()
 
-        with information_file.open('w') as f:
+        with Path(self.information_file).open('w') as f:
             f.write(f'source: {",".join(self.model_names)}\n')
             f.write(f'tokenization_mode: {self.tokenization_mode}\n')
             f.write(f'subword_pooling_method: {self.subword_pooling_method}\n')

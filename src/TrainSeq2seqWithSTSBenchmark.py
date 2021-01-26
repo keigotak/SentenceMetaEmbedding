@@ -17,28 +17,29 @@ from AbstractGetSentenceEmbedding import *
 from AbstractTrainer import *
 from ValueWatcher import ValueWatcher
 from DataPooler import DataPooler
-from HelperFunctions import set_seed, get_now
+from HelperFunctions import set_seed, get_now, get_device
 
 
 class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
-    def __init__(self):
+    def __init__(self, device):
+        self.device = get_device(device)
         self.model_names = ['bert-base-uncased', 'roberta-base']
         self.source = {model: GetHuggingfaceWordEmbedding(model) for model in self.model_names}
         self.embedding_dims = {model: self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names}
         self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
 
         self.meta_embedding_dim = 100
-        self.projection_matrices = {key: torch.randn((self.embedding_dims[key], self.meta_embedding_dim), requires_grad=True) for key in self.model_names}
+        self.projection_matrices = {key: torch.randn((self.embedding_dims[key], self.meta_embedding_dim), requires_grad=True).to(self.device) for key in self.model_names}
 
         self.nonlinear = nn.ReLU()
-        self.parameter_vector = torch.randn(self.meta_embedding_dim)
+        self.parameter_vector = torch.randn(self.meta_embedding_dim).to(self.device)
 
         self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
         self.attention_head_num = 1
         self.attention_dropout_ratio = 0.2
         self.sentence_pooling_method = 'avg'
-        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio)
+        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio, device=self.device)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
         self.weight_decay = 0.005
@@ -135,8 +136,8 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
             pooled_fe_prime = torch.cat([out for out in fe_prime])
             pooled_fd_prime = torch.cat([out for out in fd_prime])
         elif self.sentence_pooling_method == 'max':
-            pooled_fe_prime = torch.max(fe_prime, dim=0)
-            pooled_fd_prime = torch.max(fd_prime, dim=0)
+            pooled_fe_prime, _ = torch.max(fe_prime, dim=0)
+            pooled_fd_prime, _ = torch.max(fd_prime, dim=0)
 
         return pooled_fe_prime, pooled_fd_prime
 
@@ -168,7 +169,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
     def save_information_file(self):
         super().save_information_file()
 
-        with information_file.open('w') as f:
+        with Path(self.information_file).open('w') as f:
             f.write(f'source: {",".join(self.model_names)}\n')
             f.write(f'meta_embedding_dim: {self.meta_embedding_dim}\n')
             f.write(f'nonlinear: {str(self.nonlinear)}\n')
