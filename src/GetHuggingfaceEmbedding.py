@@ -2,10 +2,12 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModel
 from AbstractGetSentenceEmbedding import *
+from HelperFunctions import get_device
 
 
 class GetHuggingfaceWordEmbedding:
-    def __init__(self, model_name):
+    def __init__(self, model_name, device='cpu'):
+        self.device = get_device(device)
         self.model_name = model_name
         self.model = AutoModel.from_pretrained(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
