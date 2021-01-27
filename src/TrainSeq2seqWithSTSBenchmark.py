@@ -21,7 +21,7 @@ from HelperFunctions import set_seed, get_now, get_device
 
 
 class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
-    def __init__(self, device):
+    def __init__(self, device='cpu'):
         self.device = get_device(device)
         self.model_names = ['bert-base-uncased', 'roberta-base']
         self.source = {model: GetHuggingfaceWordEmbedding(model) for model in self.model_names}
@@ -39,7 +39,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.attention_head_num = 1
         self.attention_dropout_ratio = 0.2
         self.sentence_pooling_method = 'avg'
-        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio, device=self.device)
+        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio).to(self.device)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
         self.weight_decay = 0.005
@@ -124,9 +124,9 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
                              self.model_names}
 
         # dim: sentence length, source embedding dim
-        fd_prime = torch.einsum('pq, pr->pr', attention_score,
+        fd_prime = torch.einsum('pq, rs->ps', attention_score,
                                 target_embeddings[self.model_names[self.get_encoder_model_idx()]])
-        fe_prime = torch.einsum('pq, pr->pr', attention_score,
+        fe_prime = torch.einsum('pq, rs->ps', attention_score,
                                 target_embeddings[self.model_names[self.get_decoder_model_idx()]])
 
         if self.sentence_pooling_method == 'avg':
