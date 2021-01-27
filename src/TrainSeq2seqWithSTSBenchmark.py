@@ -28,7 +28,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.embedding_dims = {model: self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names}
         self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
 
-        self.meta_embedding_dim = 100
+        self.meta_embedding_dim = 500
         self.projection_matrices = {key: torch.randn((self.embedding_dims[key], self.meta_embedding_dim), requires_grad=True).to(self.device) for key in self.model_names}
 
         self.nonlinear = nn.ReLU()
