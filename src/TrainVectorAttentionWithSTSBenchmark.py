@@ -33,7 +33,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
-        self.weight_decay = 0.005
+        self.weight_decay = 0.01
         self.parameters = list(self.vector_attention.values())
 
         super().__init__()
