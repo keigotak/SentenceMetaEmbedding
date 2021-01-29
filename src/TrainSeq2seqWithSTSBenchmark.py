@@ -43,13 +43,13 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
         self.weight_decay = 0.005
-        self.lambda_e, self.lambda_d = 0.01, 0.01
+        self.lambda_e, self.lambda_d = 0.001, 0.001
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
 
         super().__init__()
 
         self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
-        self.which_prime_output_to_use_in_testing = 'decoder'
+        self.which_prime_output_to_use_in_testing = 'encoder'
 
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=True):
         running_loss = 0.0
