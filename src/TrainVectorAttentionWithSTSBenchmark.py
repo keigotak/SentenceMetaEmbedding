@@ -26,7 +26,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
         self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
-        self.source_pooling_method = 'avg'
+        self.source_pooling_method = 'concat'
         self.sentence_pooling_method = 'avg'
         self.vector_attention = {model: torch.FloatTensor(self.source[model].model.embeddings.word_embeddings.embedding_dim).uniform_().requires_grad_(False) for model in self.model_names}
         self.vector_attention = {model: self.vector_attention[model] / sum(self.vector_attention[model]) for model in self.model_names}
