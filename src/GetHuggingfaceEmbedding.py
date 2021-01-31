@@ -101,7 +101,7 @@ class GetHaggingfaceEmbedding(AbstractGetSentenceEmbedding):
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.mode = 'avg'
+        self.mode = 'max'
 
     def get_model(self):
         self.model = AutoModel.from_pretrained(self.model_name)
@@ -120,9 +120,9 @@ class GetHaggingfaceEmbedding(AbstractGetSentenceEmbedding):
             if self.mode == 'avg':
                 sentence_embedding = sentence_embedding[1:-1]
                 sentence_embedding = torch.mean(sentence_embedding, dim=0)
-            elif self.mode == 'concat':
+            elif self.mode == 'max':
                 sentence_embedding = sentence_embedding[1:-1]
-                sentence_embedding = torch.cat(sentence_embedding, dim=0)
+                sentence_embedding, _ = torch.max(sentence_embedding, dim=0)
             elif self.mode == 'cls':
                 sentence_embedding = sentence_embedding[0]
             sentence_embeddings.append(sentence_embedding.tolist())  # get sentence embeddings
@@ -133,7 +133,7 @@ class GetHaggingfaceEmbedding(AbstractGetSentenceEmbedding):
 if __name__ == '__main__':
     cls = GetHaggingfaceEmbedding()
     for model_name in cls.model_names:
-        print(f'{model_name}-{cls.model.mode}-{cls.model.tokenization_mode}')
+        print(f'{model_name}-{cls.mode}')
         cls.set_model(model_name)
         cls.single_eval(model_name)
         if cls.with_reset_output_file:
