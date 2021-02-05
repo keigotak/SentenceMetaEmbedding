@@ -97,7 +97,7 @@ class GetHaggingfaceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
         super().__init__()
-        self.model_names = ['bert-base-uncased']
+        self.model_names = ['roberta-base'] # bert-base-uncased, roberta-base
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
