@@ -93,7 +93,7 @@ class GetHuggingfaceWordEmbedding:
         return [self.tokenizer.convert_ids_to_tokens(_ids) for _ids in ids]
 
 
-class GetHaggingfaceEmbedding(AbstractGetSentenceEmbedding):
+class GetHuggingfaceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
         # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
         super().__init__()
@@ -131,7 +131,7 @@ class GetHaggingfaceEmbedding(AbstractGetSentenceEmbedding):
 
 
 if __name__ == '__main__':
-    cls = GetHaggingfaceEmbedding()
+    cls = GetHuggingfaceEmbedding()
     for model_name in cls.model_names:
         print(f'{model_name}-{cls.mode}')
         cls.set_model(model_name)
