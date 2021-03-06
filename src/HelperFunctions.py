@@ -25,7 +25,6 @@ def get_device(device):
         if type(device) != int:
             device = int(device)
         if torch.cuda.is_available():
-            os.environ["CUDA_VISIBLE_DEVICES"] = f"{device}"
-            return torch.device(device)
+            return torch.device(0)
         else:
             return torch.device('cpu')

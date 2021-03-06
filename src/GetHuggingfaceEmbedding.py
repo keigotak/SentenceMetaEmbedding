@@ -70,7 +70,6 @@ class GetHuggingfaceWordEmbedding:
         if self.tokenization_mode == 'subword':
             emb_sent1 = self.process_subword(sent1, emb_sent1.squeeze(0))
             emb_sent2 = self.process_subword(sent2, emb_sent2.squeeze(0))
-
         embedding = [emb_sent1.squeeze(0).tolist(), emb_sent2.squeeze(0).tolist()]
 
         return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
@@ -101,7 +100,7 @@ class GetHuggingfaceEmbedding(AbstractGetSentenceEmbedding):
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.mode = 'max'
+        self.source_pooling_method = 'cls'
 
     def get_model(self):
         self.model = AutoModel.from_pretrained(self.model_name)
@@ -117,13 +116,13 @@ class GetHuggingfaceEmbedding(AbstractGetSentenceEmbedding):
         for sentence in batch:
             indexes = self.tokenizer(' '.join(sentence), return_tensors="pt")
             sentence_embedding = self.model(**indexes)[0].squeeze(0)
-            if self.mode == 'avg':
+            if self.source_pooling_method == 'avg':
                 sentence_embedding = sentence_embedding[1:-1]
                 sentence_embedding = torch.mean(sentence_embedding, dim=0)
-            elif self.mode == 'max':
+            elif self.source_pooling_method == 'max':
                 sentence_embedding = sentence_embedding[1:-1]
                 sentence_embedding, _ = torch.max(sentence_embedding, dim=0)
-            elif self.mode == 'cls':
+            elif self.source_pooling_method == 'cls':
                 sentence_embedding = sentence_embedding[0]
             sentence_embeddings.append(sentence_embedding.tolist())  # get sentence embeddings
             self.embeddings[model_name][' '.join(sentence)] = sentence_embedding.tolist()

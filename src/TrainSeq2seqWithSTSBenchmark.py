@@ -11,7 +11,7 @@ from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
 
 from STSDataset import STSDataset
-from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
+from GetSentenceBertEmbedding import GetSentenceBertWordEmbedding
 from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstractGetSentenceEmbedding import *
 from AbstractTrainer import *
@@ -23,16 +23,26 @@ from HelperFunctions import set_seed, get_now, get_device
 class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
     def __init__(self, device='cpu'):
         self.device = get_device(device)
-        self.model_names = ['bert-base-uncased', 'roberta-base']
-        self.source = {model: GetHuggingfaceWordEmbedding(model) for model in self.model_names}
-        self.embedding_dims = {model: self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names}
-        self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
 
-        self.meta_embedding_dim = 300
-        self.projection_matrices = {key: torch.randn((self.embedding_dims[key], self.meta_embedding_dim), requires_grad=True).to(self.device) for key in self.model_names}
+        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
+        self.model_dims = {'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
+        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) for model in self.model_names}
+        self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
+        self.total_dim = sum(self.embedding_dims.values())
 
-        self.nonlinear = nn.ReLU()
-        self.parameter_vector = torch.randn(self.meta_embedding_dim).to(self.device)
+        self.meta_embedding_dim = 1024 # 半分，同じ，倍にしてどうか
+        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.meta_embedding_dim).uniform_().requires_grad_(False) for model in self.model_names}
+        for model in self.model_names:
+            for i, t in enumerate(self.projection_matrices[model]):
+                t = t / torch.sum(t)
+                self.projection_matrices[model][i] = t
+        self.projection_matrices = {model: self.projection_matrices[model].requires_grad_(True).to(self.device) for model in self.model_names}
+
+        self.nonlinear = nn.ReLU() # linear で試してみる
+
+        self.parameter_vector = torch.FloatTensor(self.meta_embedding_dim).uniform_().requires_grad_(False)
+        self.parameter_vector = self.parameter_vector / torch.sum(self.parameter_vector)
+        self.parameter_vector = self.parameter_vector.requires_grad_(True)
 
         self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
@@ -43,13 +53,14 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
         self.weight_decay = 0.005
-        self.lambda_e, self.lambda_d = 0.001, 0.001
+        self.lambda_e, self.lambda_d = 0.001, 0.001 # lambda = 0でやってみる （直交性を入れたいから入れている→学習ラウンドごとに長さを１にするとか．W, W.Tの結果を見て，対角の値QR分解をかける）
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
 
         super().__init__()
-
+        self.batch_size = 128
+        self.datasets['train'].batch_size = self.batch_size
         self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
-        self.which_prime_output_to_use_in_testing = 'encoder'
+        self.which_prime_output_to_use_in_testing = 'decoder'
 
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=True):
         running_loss = 0.0
@@ -57,6 +68,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
             self.optimizer.zero_grad()
 
         gs_scores, sys_scores = [], []
+        losses = []
         for embeddings, score in zip(batch_embeddings, scores):
             fe_prime_outputs, fd_prime_outputs = [], []
             for i in range(2):  # for input sentences, sentence1 and sentence2
@@ -83,11 +95,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
                     torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
 
                 loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
-
-                if with_training:
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
-                    self.optimizer.step()
+                losses.append(loss)
 
                 running_loss += loss.item()
                 fe_prime_outputs.append(fe_prime)
@@ -102,6 +110,12 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
                 sys_scores.append(sys_score)
                 gs_scores.append(score)
 
+        if with_training:
+            loss = torch.mean(torch.stack(losses))
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
+            self.optimizer.step()
+
         return gs_scores, sys_scores, running_loss
 
     def step(self, feature):
@@ -110,11 +124,16 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
             torch.matmul(torch.FloatTensor(feature[model_name]), self.projection_matrices[model_name]) for
             model_name in self.model_names]
 
-        # dim: sentence length, meta embedding dim
-        nonlineared_feature = self.nonlinear(projected_feature[0] + projected_feature[1])
-        # dim: sentence length
-        projected_feature = torch.einsum('p, qr->q', self.parameter_vector, nonlineared_feature)
-        projected_feature = projected_feature.view(-1, 1, 1)
+        if self.nonlinear is not None:
+            # dim: sentence length, meta embedding dim
+            nonlineared_feature = self.nonlinear(projected_feature[0] + projected_feature[1])
+            # dim: sentence length
+            projected_feature = torch.einsum('p, qr->q', self.parameter_vector, nonlineared_feature)
+            projected_feature = projected_feature.view(-1, 1, 1)
+        else:
+            # dim: sentence length
+            projected_feature = torch.einsum('p, qr->q', self.parameter_vector, projected_feature[0] + projected_feature[1])
+            projected_feature = projected_feature.view(-1, 1, 1)
 
         # feature = torch.cat([torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names], dim=1).unsqueeze(0).transpose(0, 1)
         attention_score, attention_weight = self.attention(projected_feature, projected_feature, projected_feature)
@@ -138,6 +157,9 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         elif self.sentence_pooling_method == 'max':
             pooled_fe_prime, _ = torch.max(fe_prime, dim=0)
             pooled_fd_prime, _ = torch.max(fd_prime, dim=0)
+
+        pooled_fe_prime = pooled_fe_prime / torch.sum(pooled_fe_prime)
+        pooled_fd_prime = pooled_fd_prime / torch.sum(pooled_fd_prime)
 
         return pooled_fe_prime, pooled_fd_prime
 
@@ -184,6 +206,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
             f.write(f'weight_decay: {self.weight_decay}\n')
             f.write(f'lambda_e: {self.lambda_e}\n')
             f.write(f'lambda_d: {self.lambda_d}\n')
+            f.write(f'batch_size: {self.batch_size}\n')
 
     def set_tag(self, tag):
         self.tag = tag
@@ -196,7 +219,7 @@ class EvaluateSeq2seqModel(AbstractGetSentenceEmbedding):
         super().__init__()
         self.tag = get_now()
         self.model_tag = ['seq2seq']
-        self.model_names = ['bert-base-uncased', 'roberta-base']
+        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False

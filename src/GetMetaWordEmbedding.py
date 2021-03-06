@@ -1,23 +1,25 @@
-import pickle
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
+import pickle
 import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModel
-from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
+from GetSentenceBertEmbedding import GetSentenceBertWordEmbedding
 from AbstractGetSentenceEmbedding import *
 
 
 class GetMetaWordEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
-        # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()
-        self.model_names = ['bert-base-uncased', 'roberta-base']
-        self.source = {model: GetHuggingfaceWordEmbedding(model) for model in self.model_names}
-        self.total_dim = sum([self.source[model].model.embeddings.word_embeddings.embedding_dim for model in self.model_names])
+        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
+        self.model_dims = {'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
+        self.source = {model: GetSentenceBertWordEmbedding(model) for model in self.model_names}
+        self.total_dim = sum([self.model_dims[model] for model in self.model_names])
         self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
-        self.source_pooling_method = 'avg'
-        self.sentence_pooling_method = 'avg'
+        self.source_pooling_method = 'concat'   # avg, concat
+        self.sentence_pooling_method = 'avg'    # avg, max
 
     def get_model(self):
         return self.source
