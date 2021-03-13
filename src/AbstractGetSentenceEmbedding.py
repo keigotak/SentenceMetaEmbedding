@@ -92,7 +92,7 @@ class AbstractGetSentenceEmbedding:
             with open(f'../models/sentence_embeddings_{model_name}.pkl', 'wb') as f:
                 pickle.dump(self.embeddings[model_name], f)
 
-        return texts
+        return {'text': texts, 'pearson': results[task]["pearson"], 'spearman': results[task]["spearman"]}
 
 
 def prepare(params, samples):

@@ -1,4 +1,3 @@
-import os
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -12,6 +11,7 @@ from senteval.utils import cosine
 
 from STSDataset import STSDataset
 from GetSentenceBertEmbedding import GetSentenceBertWordEmbedding
+from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
 from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstractGetSentenceEmbedding import *
 from AbstractTrainer import *
@@ -25,22 +25,22 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.device = get_device(device)
 
         self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
-        self.model_dims = {'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
-        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) for model in self.model_names}
+        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
+        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']) else GetHuggingfaceWordEmbedding(model, device=self.device) for model in self.model_names}
         self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
         self.total_dim = sum(self.embedding_dims.values())
 
         self.meta_embedding_dim = 1024 # 半分，同じ，倍にしてどうか
-        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.meta_embedding_dim).uniform_().requires_grad_(False) for model in self.model_names}
+        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.meta_embedding_dim).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
         for model in self.model_names:
             for i, t in enumerate(self.projection_matrices[model]):
                 t = t / torch.sum(t)
                 self.projection_matrices[model][i] = t
         self.projection_matrices = {model: self.projection_matrices[model].requires_grad_(True).to(self.device) for model in self.model_names}
 
-        self.nonlinear = nn.ReLU() # linear で試してみる
+        self.nonlinear = None # None, nn.ReLU() # linear で試してみる
 
-        self.parameter_vector = torch.FloatTensor(self.meta_embedding_dim).uniform_().requires_grad_(False)
+        self.parameter_vector = torch.FloatTensor(self.meta_embedding_dim).uniform_().detach_().to(self.device).requires_grad_(False)
         self.parameter_vector = self.parameter_vector / torch.sum(self.parameter_vector)
         self.parameter_vector = self.parameter_vector.requires_grad_(True)
 
@@ -50,13 +50,14 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.attention_dropout_ratio = 0.2
         self.sentence_pooling_method = 'avg'
         self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio).to(self.device)
-        self.learning_ratio = 0.01
-        self.gradient_clip = 0.2
+        self.learning_ratio = 0.05
+        self.gradient_clip = 1.0
         self.weight_decay = 0.005
         self.lambda_e, self.lambda_d = 0.001, 0.001 # lambda = 0でやってみる （直交性を入れたいから入れている→学習ラウンドごとに長さを１にするとか．W, W.Tの結果を見て，対角の値QR分解をかける）
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
 
         super().__init__()
+
         self.batch_size = 128
         self.datasets['train'].batch_size = self.batch_size
         self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
@@ -76,7 +77,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
                     model_name in self.model_names})
 
                 ## calculate loss
-                target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name][i]) for
+                target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name][i]).to(self.device) for
                     model_name in self.model_names}
                 ld_2norm = torch.norm(target_embeddings[self.model_names[self.get_decoder_model_idx()]] - fd_prime, dim=1)
                 le_2norm = torch.norm(target_embeddings[self.model_names[self.get_encoder_model_idx()]] - fe_prime, dim=1)
@@ -89,10 +90,10 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
 
                 we = self.projection_matrices[self.model_names[self.get_encoder_model_idx()]]
                 l_we = torch.square(
-                    torch.norm(torch.einsum('pq, rs->qr', we, we.T) - torch.eye(self.meta_embedding_dim)))
+                    torch.norm(torch.einsum('pq, rs->qr', we, we.T) - torch.eye(self.meta_embedding_dim).to(self.device)))
                 wd = self.projection_matrices[self.model_names[self.get_decoder_model_idx()]]
                 l_wd = torch.square(
-                    torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim)))
+                    torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim).to(self.device)))
 
                 loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
                 losses.append(loss)
@@ -113,7 +114,8 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         if with_training:
             loss = torch.mean(torch.stack(losses))
             loss.backward()
-            nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
+            if self.gradient_clip > 0:
+                nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
 
         return gs_scores, sys_scores, running_loss
@@ -121,7 +123,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
     def step(self, feature):
         # dim: sentence length, meta embedding dim
         projected_feature = [
-            torch.matmul(torch.FloatTensor(feature[model_name]), self.projection_matrices[model_name]) for
+            torch.einsum('pq, rs->ps', torch.FloatTensor(feature[model_name]).to(self.device), self.projection_matrices[model_name]) for
             model_name in self.model_names]
 
         if self.nonlinear is not None:
@@ -139,7 +141,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         attention_score, attention_weight = self.attention(projected_feature, projected_feature, projected_feature)
         attention_score = attention_score.view(-1, 1)
 
-        target_embeddings = {model_name: torch.FloatTensor(feature[model_name]) for model_name in
+        target_embeddings = {model_name: torch.FloatTensor(feature[model_name]).to(self.device) for model_name in
                              self.model_names}
 
         # dim: sentence length, source embedding dim
@@ -158,8 +160,8 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
             pooled_fe_prime, _ = torch.max(fe_prime, dim=0)
             pooled_fd_prime, _ = torch.max(fd_prime, dim=0)
 
-        pooled_fe_prime = pooled_fe_prime / torch.sum(pooled_fe_prime)
-        pooled_fd_prime = pooled_fd_prime / torch.sum(pooled_fd_prime)
+        # pooled_fe_prime = pooled_fe_prime / torch.sum(pooled_fe_prime)
+        # pooled_fd_prime = pooled_fd_prime / torch.sum(pooled_fd_prime)
 
         return pooled_fe_prime, pooled_fd_prime
 
@@ -213,17 +215,51 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.save_model_path = f'../models/seq2seq-{self.tag}.pkl'
         self.information_file = f'../results/seq2seq/info-{self.tag}.txt'
 
+    def update_hyper_parameters(self, hyper_params):
+        self.meta_embedding_dim = hyper_params['meta_embedding_dim'] # 半分，同じ，倍にしてどうか
+        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.meta_embedding_dim).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
+        for model in self.model_names:
+            for i, t in enumerate(self.projection_matrices[model]):
+                t = t / torch.sum(t)
+                self.projection_matrices[model][i] = t
+        self.projection_matrices = {model: self.projection_matrices[model].requires_grad_(True).to(self.device) for model in self.model_names}
+
+        if hyper_params['activation'] == 'none':
+            self.nonlinear = None # None, nn.ReLU() # linear で試してみる
+        elif hyper_params['activation'] == 'relu':
+            self.nonlinear = nn.ReLU()
+        elif hyper_params['activation'] == 'tanh':
+            self.nonlinear = nn.Tanh()
+
+        self.parameter_vector = torch.FloatTensor(self.meta_embedding_dim).uniform_().detach_().to(self.device).requires_grad_(False)
+        self.parameter_vector = self.parameter_vector / torch.sum(self.parameter_vector)
+        self.parameter_vector = self.parameter_vector.requires_grad_(True)
+
+        self.attention_dropout_ratio = hyper_params['attention_dropout_ratio']
+        self.sentence_pooling_method = hyper_params['sentence_pooling_method']
+        self.attention = nn.MultiheadAttention(embed_dim=1, num_heads=self.attention_head_num, dropout=self.attention_dropout_ratio).to(self.device)
+        self.learning_ratio = hyper_params['learning_ratio']
+        self.gradient_clip = hyper_params['gradient_clip']
+        self.weight_decay = hyper_params['weight_decay']
+        self.lambda_e, self.lambda_d = hyper_params['lambda_e'], hyper_params['lambda_d'] # lambda = 0でやってみる （直交性を入れたいから入れている→学習ラウンドごとに長さを１にするとか．W, W.Tの結果を見て，対角の値QR分解をかける）
+        self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
+
+        super().__init__()
+
+        self.batch_size = hyper_params['batch_size']
+        self.datasets['train'].batch_size = self.batch_size
+        self.which_prime_output_to_use_in_testing = hyper_params['which_prime_output_to_use_in_testing']
+
 
 class EvaluateSeq2seqModel(AbstractGetSentenceEmbedding):
-    def __init__(self):
+    def __init__(self, device='cpu'):
         super().__init__()
         self.tag = get_now()
-        self.model_tag = ['seq2seq']
         self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.model = TrainSeq2seqWithSTSBenchmark()
+        self.model = TrainSeq2seqWithSTSBenchmark(device=device)
         self.model_tag = [f'seq2seq-{self.tag}']
         self.output_file_name = 'seq2seq.txt'
         self.which_prime_output_to_use_in_testing = self.model.which_prime_output_to_use_in_testing
@@ -256,14 +292,30 @@ class EvaluateSeq2seqModel(AbstractGetSentenceEmbedding):
             outputs = fd_prime_outputs
         return np.array(outputs)
 
+    def set_tag(self, tag):
+        self.model_tag[0] = f'{self.model_tag[0]}-{tag}'
+        self.tag = tag
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--device', type=str, default='cpu', help='select device')
+    args = parser.parse_args()
+
+    if args.device != 'cpu':
+        import os
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+
     with_senteval = True
     if with_senteval:
         dp = DataPooler()
-        vw = ValueWatcher()
-        cls = EvaluateSeq2seqModel()
-        trainer = TrainSeq2seqWithSTSBenchmark()
+        es_metrics = 'dev_loss'
+        if es_metrics == 'dev_loss':
+            vw = ValueWatcher(mode='minimize')
+        else:
+            vw = ValueWatcher()
+        cls = EvaluateSeq2seqModel(device=args.device)
+        trainer = TrainSeq2seqWithSTSBenchmark(device=args.device)
 
         trainer.model_names = cls.model_names
         trainer.set_tag(cls.tag)
@@ -273,7 +325,10 @@ if __name__ == '__main__':
             trainer.train_epoch()
             trainer.datasets['train'].reset(with_shuffle=True)
             rets = trainer.inference(mode='dev')
-            vw.update(rets['pearson'][0])
+            if es_metrics == 'pearson':
+                vw.update(rets[es_metrics][0])
+            else:
+                vw.update(rets[es_metrics])
             if vw.is_updated():
                 trainer.save_model()
                 dp.set('best-epoch', vw.epoch)
@@ -286,7 +341,19 @@ if __name__ == '__main__':
         print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
         rets = cls.single_eval(cls.model_tag[0])
-        trainer.append_information_file(rets)
+        trainer.append_information_file([f'es_metrics: {es_metrics}'])
+        trainer.append_information_file(rets['text'])
     else:
-        trainer = TrainSeq2seqWithSTSBenchmark()
-        trainer.train()
+        cls = EvaluateSeq2seqModel(device=args.device)
+        trainer = TrainSeq2seqWithSTSBenchmark(device=args.device)
+        tag = '03062021182903217559'
+        trainer.set_tag(tag)
+        cls.set_tag(tag)
+        trainer.load_model()
+        rets = trainer.inference(mode='test')
+        print(f'test best scores: ' + ' '.join(rets['prints']))
+        cls.model = trainer
+        model_tag = cls.model_tag[0]
+        if cls.tag != trainer.tag:
+            model_tag = f'{model_tag}-{trainer.tag}'
+        rets = cls.single_eval(model_tag)

@@ -177,9 +177,17 @@ if __name__ == '__main__':
             if cls.with_reset_output_file:
                 cls.with_reset_output_file = False
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--device', type=str, default='cpu', help='select device')
+        args = parser.parse_args()
+
+        if args.device != 'cpu':
+            import os
+            os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+
         for model_name in ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']:
-            cls = GetSentenceBertWordEmbedding(model_name=model_name, device=0)
+            cls = GetSentenceBertWordEmbedding(model_name=model_name, device=args.device)
             cls.set_tag(get_now())
             print(model_name)
             cls.set_model(model_name)

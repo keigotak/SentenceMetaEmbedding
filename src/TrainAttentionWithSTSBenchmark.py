@@ -1,10 +1,6 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-import argparse
 
 import numpy as np
 import torch
@@ -15,6 +11,7 @@ from senteval.utils import cosine
 
 from STSDataset import STSDataset
 from GetSentenceBertEmbedding import GetSentenceBertWordEmbedding
+from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
 from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstractGetSentenceEmbedding import *
 from AbstractTrainer import *
@@ -27,8 +24,8 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
     def __init__(self, device='cpu'):
         self.device = get_device(device)
         self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
-        self.model_dims = {'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
-        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) for model in self.model_names}
+        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
+        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']) else GetHuggingfaceWordEmbedding(model) for model in self.model_names}
         self.embedding_dims = [self.model_dims[model] for model in self.model_names]
         self.attention_head_num = 1
         self.dropout_ratio = 0.2
@@ -80,7 +77,8 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
         if with_training:
             loss = torch.mean(torch.stack(losses))
             loss.backward()
-            nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
+            if self.gradient_clip > 0:
+                nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
 
         return gs_scores, sys_scores, running_loss
@@ -136,6 +134,25 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
         self.save_model_path = f'../models/attention-{self.tag}.pkl'
         self.information_file = f'../results/attention/info-{self.tag}.txt'
 
+    def update_hyper_parameters(self, hyper_params):
+        self.dropout_ratio = hyper_params['dropout_ratio']
+        self.source_pooling_method = hyper_params['source_pooling_method']
+        self.sentence_pooling_method = hyper_params['sentence_pooling_method']
+        if self.source_pooling_method == 'avg':
+            self.attention = nn.MultiheadAttention(embed_dim=max(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
+        elif self.source_pooling_method == 'concat':
+            self.attention = nn.MultiheadAttention(embed_dim=sum(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
+
+        self.learning_ratio = hyper_params['learning_ratio']
+        self.gradient_clip = hyper_params['gradient_clip']
+        self.weight_decay = hyper_params['weight_decay']
+        self.parameters = list(self.attention.parameters())
+
+        super().__init__()
+
+        self.batch_size = hyper_params['batch_size']
+        self.datasets['train'].batch_size = self.batch_size
+
 
 class EvaluateAttentionModel(AbstractGetSentenceEmbedding):
     def __init__(self, device='cpu'):
@@ -175,17 +192,21 @@ class EvaluateAttentionModel(AbstractGetSentenceEmbedding):
 
 
 if __name__ == '__main__':
+    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', type=str, default='cpu', help='select device')
     args = parser.parse_args()
-    device = get_device(args.device)
+
+    if args.device != 'cpu':
+        import os
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
     with_senteval = True
     if with_senteval:
         dp = DataPooler()
         vw = ValueWatcher()
-        cls = EvaluateAttentionModel(device=device)
-        trainer = TrainAttentionWithSTSBenchmark(device=device)
+        cls = EvaluateAttentionModel(device=args.device)
+        trainer = TrainAttentionWithSTSBenchmark(device=args.device)
 
         trainer.model_names = cls.model_names
         trainer.set_tag(cls.tag)
@@ -208,7 +229,7 @@ if __name__ == '__main__':
         print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
         rets = cls.single_eval(cls.model_tag[0])
-        trainer.append_information_file(rets)
+        trainer.append_information_file(rets['text'])
     else:
-        trainer = TrainAttentionWithSTSBenchmark()
+        trainer = TrainAttentionWithSTSBenchmark(device=args.device)
         trainer.train()

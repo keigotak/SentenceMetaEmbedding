@@ -106,7 +106,8 @@ class AbstractTrainer:
 
         results = {'pearson': pearsonr(sys_scores, gs_scores),
                    'spearman': spearmanr(sys_scores, gs_scores),
-                   'nsamples': len(sys_scores)}
+                   'nsamples': len(sys_scores),
+                   'dev_loss': running_loss}
 
         print_contents = [f'STSBenchmark-{mode}',
                           f'pearson: {self.get_round_score(results["pearson"][0]) :.2f}',

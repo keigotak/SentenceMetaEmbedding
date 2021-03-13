@@ -1,4 +1,3 @@
-import os
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -12,6 +11,7 @@ from senteval.utils import cosine
 
 from STSDataset import STSDataset
 from GetSentenceBertEmbedding import GetSentenceBertWordEmbedding
+from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
 from AbstractGetSentenceEmbedding import *
 from AbstractTrainer import *
 from ValueWatcher import ValueWatcher
@@ -23,8 +23,8 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
     def __init__(self, device='cpu'):
         self.device = get_device(device)
         self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
-        self.model_dims = {'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
-        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) for model in self.model_names}
+        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
+        self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']) else GetHuggingfaceWordEmbedding(model, device=self.device) for model in self.model_names}
         self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
         self.total_dim = sum(self.embedding_dims.values())
 
@@ -32,23 +32,26 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
         self.source_pooling_method = 'concat' # avg, concat
         self.sentence_pooling_method = 'avg' # avg, max
-        self.with_vector_attention = True
 
-        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.embedding_dims[model]).uniform_().requires_grad_(False) for model in self.model_names}
+        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.embedding_dims[model]).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
         for model in self.model_names:
             for i, t in enumerate(self.projection_matrices[model]):
                 t = t / torch.sum(t)
                 self.projection_matrices[model][i] = t
         self.projection_matrices = {model: self.projection_matrices[model].requires_grad_(True) for model in self.model_names}
 
-        self.vector_attention = {model: torch.FloatTensor(self.embedding_dims[model]).uniform_().requires_grad_(False) for model in self.model_names}
+        self.vector_attention = {model: torch.FloatTensor(self.embedding_dims[model]).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
         self.vector_attention = {model: self.vector_attention[model] / sum(self.vector_attention[model]) for model in self.model_names}
         self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
 
-        self.learning_ratio = 0.01
+        self.learning_ratio = 0.001
         self.gradient_clip = 0.2
-        self.weight_decay = 0.01
-        self.parameters = list(self.vector_attention.values())
+        self.weight_decay = 0.001
+        self.with_vector_attention = True
+        if self.with_vector_attention:
+            self.parameters = list(self.vector_attention.values()) + list(self.projection_matrices.values())
+        else:
+            self.parameters = list(self.projection_matrices.values())
 
         super().__init__()
 
@@ -82,14 +85,15 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         if with_training:
             loss = torch.mean(torch.stack(losses))
             loss.backward()
-            nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
+            if self.gradient_clip > 0:
+                nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
 
         return gs_scores, sys_scores, running_loss
 
     def step(self, feature):
         projected_embeddings = {
-            model_name: torch.einsum('pq, rs->ps', feature[model_name], self.projection_matrices[model_name]) for
+            model_name: torch.einsum('pq, rs->ps', feature[model_name].to(self.device), self.projection_matrices[model_name]) for
             model_name in self.model_names}
         if self.with_vector_attention:
             word_embeddings = {
@@ -119,6 +123,8 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
             pooled_sentence_embedding = torch.mean(torch.stack(pooled_word_embeddings), dim=0)
         elif self.sentence_pooling_method == 'max':
             pooled_sentence_embedding, _ = torch.max(torch.stack(pooled_word_embeddings), dim=0)
+
+        pooled_sentence_embedding = pooled_sentence_embedding / torch.sum(pooled_sentence_embedding)
 
         return pooled_sentence_embedding
 
@@ -163,16 +169,34 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.tag = tag
         self.information_file = f'../results/vec_attention/info-{self.tag}.txt'
 
+    def update_hyper_parameters(self, hyper_params):
+        self.source_pooling_method = hyper_params['source_pooling_method']
+        self.sentence_pooling_method = hyper_params['sentence_pooling_method']
+
+        self.learning_ratio = hyper_params['learning_ratio']
+        self.gradient_clip = hyper_params['gradient_clip']
+        self.weight_decay = hyper_params['weight_decay']
+        self.with_vector_attention = hyper_params['with_vector_attention']
+        if self.with_vector_attention:
+            self.parameters = list(self.vector_attention.values()) + list(self.projection_matrices.values())
+        else:
+            self.parameters = list(self.projection_matrices.values())
+
+        super().__init__()
+
+        self.batch_size = hyper_params['batch_size']
+        self.datasets['train'].batch_size = self.batch_size
+
 
 class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
         self.tag = get_now()
         self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.model = TrainVectorAttentionWithSTSBenchmark()
+        self.model = TrainVectorAttentionWithSTSBenchmark(device=device)
         self.model.model_names = self.model_names
         self.model_tag = [f'vec_attention-{self.tag}']
         self.output_file_name = 'vec_attention.txt'
@@ -198,14 +222,30 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
 
         return np.array(sentence_embeddings)
 
+    def set_tag(self, tag):
+        self.model_tag[0] = f'{self.model_tag[0]}-{tag}'
+        self.tag = tag
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--device', type=str, default='cpu', help='select device')
+    args = parser.parse_args()
+
+    if args.device != 'cpu':
+        import os
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device
+
     with_senteval = True
     if with_senteval:
         dp = DataPooler()
-        vw = ValueWatcher()
-        cls = EvaluateVectorAttentionModel()
-        trainer = TrainVectorAttentionWithSTSBenchmark()
+        es_metrics = 'dev_loss'
+        if es_metrics == 'dev_loss':
+            vw = ValueWatcher(mode='minimize')
+        else:
+            vw = ValueWatcher()
+        cls = EvaluateVectorAttentionModel(device=args.device)
+        trainer = TrainVectorAttentionWithSTSBenchmark(args.device)
 
         trainer.model_names = cls.model_names
         trainer.set_tag(cls.tag)
@@ -215,7 +255,10 @@ if __name__ == '__main__':
             trainer.train_epoch()
             trainer.datasets['train'].reset(with_shuffle=True)
             rets = trainer.inference(mode='dev')
-            vw.update(rets['pearson'][0])
+            if es_metrics == 'pearson':
+                vw.update(rets[es_metrics][0])
+            else:
+                vw.update(rets[es_metrics])
             if vw.is_updated():
                 trainer.save_model()
                 dp.set('best-epoch', vw.epoch)
@@ -228,7 +271,19 @@ if __name__ == '__main__':
         print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
         rets = cls.single_eval(cls.model_tag[0])
-        trainer.append_information_file(rets)
+        trainer.append_information_file([f'es_metrics: {es_metrics}'])
+        trainer.append_information_file(rets['text'])
     else:
-        trainer = TrainAttentionWithSTSBenchmark()
-        trainer.train()
+        cls = EvaluateVectorAttentionModel(device=args.device)
+        trainer = TrainVectorAttentionWithSTSBenchmark(args.device)
+        tag = '03062021183728375245'
+        trainer.set_tag(tag)
+        cls.set_tag(tag)
+        trainer.load_model()
+        rets = trainer.inference(mode='test')
+        print(f'test best scores: ' + ' '.join(rets['prints']))
+        cls.model = trainer
+        model_tag = cls.model_tag[0]
+        if cls.tag != trainer.tag:
+            model_tag = f'{model_tag}-{trainer.tag}'
+        rets = cls.single_eval(model_tag)
