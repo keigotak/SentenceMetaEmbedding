@@ -26,7 +26,7 @@ class AbstractTrainer:
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
         self.tag = get_now()
-
+        self.cos = nn.CosineSimilarity(dim=0)
 
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
         raise NotImplementedError
