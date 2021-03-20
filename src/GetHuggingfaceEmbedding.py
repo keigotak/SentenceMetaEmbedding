@@ -154,7 +154,7 @@ if __name__ == '__main__':
     for model_name in cls.model_names:
         print(f'{model_name}-{cls.source_pooling_method}')
         cls.set_model(model_name)
-        cls.single_eval(model_name)
+        rets = cls.single_eval(model_name)
         if cls.with_reset_output_file:
             cls.with_reset_output_file = False
 
