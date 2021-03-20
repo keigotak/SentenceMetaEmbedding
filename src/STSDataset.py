@@ -17,9 +17,10 @@ class STSDataset:
             sys.exit('Please set dataset type.')
 
         self.texts = None
-        with self.path.open('r') as f:
+        with self.path.open('r', encoding='utf-8') as f:
             self.texts = [self.get_data_dict(*line.strip().split('\t')) for line in f.readlines()]
         self.dataset_size = len(self.texts)
+        self.batch_mode = 'fixed' # full, fixed
 
     @staticmethod
     def get_data_dict(genre, filename, year, index, score, sentence1, sentence2):
@@ -53,8 +54,12 @@ class STSDataset:
             self.shuffle()
 
     def is_batch_end(self):
-        if self.current == len(self.texts):
-            return True
+        if self.batch_mode == 'full':
+            if self.current == self.dataset_size:
+                return True
+        elif self.batch_mode == 'fixed':
+            if self.current >= int(self.dataset_size / 10 + 0.5):
+                return True
         return False
 
     def __str__(self):
