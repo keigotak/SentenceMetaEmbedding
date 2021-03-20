@@ -44,6 +44,9 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.parameter_vector = self.parameter_vector / torch.sum(self.parameter_vector)
         self.parameter_vector = self.parameter_vector.requires_grad_(True)
 
+        self.cos0 = torch.nn.CosineSimilarity(dim=0)
+        self.cos1 = torch.nn.CosineSimilarity(dim=1)
+
         self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
         self.attention_head_num = 1
@@ -53,7 +56,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         self.learning_ratio = 0.05
         self.gradient_clip = 1.0
         self.weight_decay = 0.005
-        self.lambda_e, self.lambda_d = 0.001, 0.001 # lambda = 0でやってみる （直交性を入れたいから入れている→学習ラウンドごとに長さを１にするとか．W, W.Tの結果を見て，対角の値QR分解をかける）
+        self.lambda_e, self.lambda_d = 0.0, 0.0 # lambda = 0でやってみる （直交性を入れたいから入れている→学習ラウンドごとに長さを１にするとか．W, W.Tの結果を見て，対角の値QR分解をかける）
         self.parameters = list(self.attention.parameters()) + list(self.projection_matrices.values()) + [self.parameter_vector]
 
         super().__init__()
@@ -73,34 +76,45 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         for embeddings, score in zip(batch_embeddings, scores):
             fe_prime_outputs, fd_prime_outputs = [], []
             for i in range(2):  # for input sentences, sentence1 and sentence2
-                fe_prime, fd_prime = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for
+                pooled_fe_prime, pooled_fd_prime, fe_prime, fd_prime = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for
                     model_name in self.model_names})
 
                 ## calculate loss
                 target_embeddings = {model_name: torch.FloatTensor(embeddings[model_name][i]).to(self.device) for
                     model_name in self.model_names}
-                ld_2norm = torch.norm(target_embeddings[self.model_names[self.get_decoder_model_idx()]] - fd_prime, dim=1)
-                le_2norm = torch.norm(target_embeddings[self.model_names[self.get_encoder_model_idx()]] - fe_prime, dim=1)
 
-                ld_2norm_square = torch.square(ld_2norm)
-                le_2norm_square = torch.square(le_2norm)
+                # ld_2norm = torch.norm(target_embeddings[self.model_names[self.get_decoder_model_idx()]] - fd_prime, dim=1)
+                # le_2norm = torch.norm(target_embeddings[self.model_names[self.get_encoder_model_idx()]] - fe_prime, dim=1)
+                #
+                # ld_2norm_square = torch.square(ld_2norm)
+                # le_2norm_square = torch.square(le_2norm)
+                #
+                # ld = torch.sum(ld_2norm_square, dim=0)
+                # le = torch.sum(le_2norm_square, dim=0)
 
-                ld = torch.sum(ld_2norm_square, dim=0)
-                le = torch.sum(le_2norm_square, dim=0)
+                ld = torch.sum(self.cos1(target_embeddings[self.model_names[self.get_decoder_model_idx()]], fd_prime))
+                le = torch.sum(self.cos1(target_embeddings[self.model_names[self.get_encoder_model_idx()]], fe_prime))
 
-                we = self.projection_matrices[self.model_names[self.get_encoder_model_idx()]]
-                l_we = torch.square(
-                    torch.norm(torch.einsum('pq, rs->qr', we, we.T) - torch.eye(self.meta_embedding_dim).to(self.device)))
-                wd = self.projection_matrices[self.model_names[self.get_decoder_model_idx()]]
-                l_wd = torch.square(
-                    torch.norm(torch.einsum('pq, rs->qr', wd, wd.T) - torch.eye(self.meta_embedding_dim).to(self.device)))
+                # we = self.projection_matrices[self.model_names[self.get_encoder_model_idx()]]
+                # we_wet = torch.einsum('pq, rs->qr', we, we.T).to('cpu')
+                # for i, _ in enumerate(we_wet):
+                #     we_wet[i][i] = we_wet[i][i] - 1.0
+                # l_we = torch.square(torch.norm(we_wet)).to(self.device)
+                #
+                # wd = self.projection_matrices[self.model_names[self.get_decoder_model_idx()]]
+                # wd_wdt = torch.einsum('pq, rs->qr', wd, wd.T).to('cpu')
+                # for i, _ in enumerate(wd_wdt):
+                #     wd_wdt[i][i] = wd_wdt[i][i] - 1.0
+                # l_wd = torch.square(torch.norm(wd_wdt)).to(self.device)
 
-                loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
+
+                # loss = le + ld + self.lambda_e * l_we + self.lambda_d * l_wd
+                loss = le + ld
                 losses.append(loss)
 
                 running_loss += loss.item()
-                fe_prime_outputs.append(fe_prime)
-                fd_prime_outputs.append(fd_prime)
+                fe_prime_outputs.append(pooled_fe_prime)
+                fd_prime_outputs.append(pooled_fd_prime)
 
             if with_calc_similality:
                 if self.which_prime_output_to_use_in_testing == 'encoder':
@@ -163,7 +177,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
         # pooled_fe_prime = pooled_fe_prime / torch.sum(pooled_fe_prime)
         # pooled_fd_prime = pooled_fd_prime / torch.sum(pooled_fd_prime)
 
-        return pooled_fe_prime, pooled_fd_prime
+        return pooled_fe_prime, pooled_fd_prime, fe_prime, fd_prime
 
     def get_encoder_model_idx(self):
         return 0
@@ -280,7 +294,7 @@ class EvaluateSeq2seqModel(AbstractGetSentenceEmbedding):
                     embeddings[model_name] = rets['embeddings'][0]
 
                 # dim: sentence length, input dim
-                pooled_fe_prime, pooled_fd_prime = self.model.step({model_name: torch.FloatTensor(embeddings[model_name])
+                pooled_fe_prime, pooled_fd_prime, fe_prime, fd_prime = self.model.step({model_name: torch.FloatTensor(embeddings[model_name])
                                                       for model_name in self.model_names})
 
                 fe_prime_outputs.append(pooled_fe_prime.tolist())
@@ -315,6 +329,7 @@ if __name__ == '__main__':
         else:
             vw = ValueWatcher()
         cls = EvaluateSeq2seqModel(device=args.device)
+        cls.model = None
         trainer = TrainSeq2seqWithSTSBenchmark(device=args.device)
 
         trainer.model_names = cls.model_names
@@ -334,7 +349,7 @@ if __name__ == '__main__':
                 dp.set('best-epoch', vw.epoch)
                 dp.set('best-score', vw.max_score)
             dp.set(f'scores', rets)
-        print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+        # print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
 
         trainer.load_model()
         rets = trainer.inference(mode='test')
@@ -346,14 +361,19 @@ if __name__ == '__main__':
     else:
         cls = EvaluateSeq2seqModel(device=args.device)
         trainer = TrainSeq2seqWithSTSBenchmark(device=args.device)
-        tag = '03062021182903217559'
-        trainer.set_tag(tag)
-        cls.set_tag(tag)
-        trainer.load_model()
-        rets = trainer.inference(mode='test')
-        print(f'test best scores: ' + ' '.join(rets['prints']))
-        cls.model = trainer
+        tag = None # '03152021104413330773'
+        if tag is not None:
+            trainer.set_tag(tag)
+            cls.set_tag(tag)
+            trainer.load_model()
+            rets = trainer.inference(mode='test')
+            print(f'test best scores: ' + ' '.join(rets['prints']))
+            cls.model = trainer
         model_tag = cls.model_tag[0]
         if cls.tag != trainer.tag:
             model_tag = f'{model_tag}-{trainer.tag}'
+        print('single eval')
         rets = cls.single_eval(model_tag)
+        trainer.append_information_file([f'es_metrics: {es_metrics}'])
+        trainer.append_information_file(rets['text'])
+
