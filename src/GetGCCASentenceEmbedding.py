@@ -8,17 +8,25 @@ class GetGCCASentenceEmbedding(AbstractGetSentenceEmbedding):
         super().__init__()
         self.model_names = ['gcca']
         self.embeddings = {model_name: {} for model_name in self.model_names}
-        self.output_file_name = 'results.gcca.201227.txt'
+        self.output_file_name = 'gcca.txt'
         self.with_reset_output_file = False
         self.with_save_embeddings = False
+        self.tag = '03202021143248394793'
 
         self.indexer = None
 
     def get_model(self):
-        with open('../models/sts_gcca.pkl', 'rb') as f:
-            self.model = pickle.load(f)
-        with open('../models/sts_gcca_sentence_indexer.pkl', 'rb') as f:
-            self.indexer = pickle.load(f)
+        if self.tag is None:
+            with open('../models/sts_gcca.pkl', 'rb') as f:
+                self.model = pickle.load(f)
+            with open('../models/sts_gcca_sentence_indexer.pkl', 'rb') as f:
+                self.indexer = pickle.load(f)
+        else:
+            with open(f'../models/gcca_{self.tag}.pkl', 'rb') as f:
+                self.model = pickle.load(f)
+            with open(f'../models/gcca_{self.tag}_sentence_indexer.pkl', 'rb') as f:
+                self.indexer = pickle.load(f)
+
         return self.model
 
     def batcher(self, params, batch):

@@ -1,6 +1,7 @@
 import pickle
 from pathlib import Path
 
+from HelperFunctions import get_now
 from GCCA import GCCA
 
 
@@ -54,13 +55,16 @@ for i, sentence in enumerate(sentences):
 # a = np.array([1., 0.])
 # b = np.array([0., 1.])
 
-gcca = GCCA()
+tag = get_now()
+
+gcca = GCCA(tag=tag)
+gcca.prepare(vectors)
 gcca.fit(vectors)
 gcca.save_model()
 gcca_vectors = gcca.transform(vectors)
-with Path('../models/sts_gcca.pkl').open('wb') as f:
+with Path(f'../models/gcca_{tag}.pkl').open('wb') as f:
     pickle.dump(gcca_vectors, f)
-with Path('../models/sts_gcca_sentence_indexer.pkl').open('wb') as f:
+with Path(f'../models/gcca_{tag}_sentence_indexer.pkl').open('wb') as f:
     pickle.dump(sentence_to_index, f)
 
 
