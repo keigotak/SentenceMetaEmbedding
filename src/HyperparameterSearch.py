@@ -10,6 +10,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', type=str, default='cpu', help='select device')
+parser.add_argument('--model', type=str, default='att')
 args = parser.parse_args()
 
 if args.device != 'cpu':
@@ -20,11 +21,12 @@ if args.device != 'cpu':
 
 def objective_a(trial):
     dp = DataPooler()
-    es_metrics = trial.suggest_categorical('es_metrics', ['dev_loss', 'pearson'])
+    # es_metrics = trial.suggest_categorical('es_metrics', ['dev_loss', 'pearson'])
+    es_metrics = 'pearson'
     if es_metrics == 'dev_loss':
         vw = ValueWatcher(mode='minimize')
     else:
-        vw = ValueWatcher()
+        vw = ValueWatcher(threshold=-1)
     cls = EvaluateAttentionModel(device=args.device)
     trainer = TrainAttentionWithSTSBenchmark(args.device)
 
@@ -55,12 +57,12 @@ def objective_a(trial):
             dp.set('best-epoch', vw.epoch)
             dp.set('best-score', vw.max_score)
         dp.set(f'scores', rets)
-    print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+    # print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
 
-    trainer.load_model()
-    rets = trainer.inference(mode='test')
-    print(f'test best scores: ' + ' '.join(rets['prints']))
-    cls.model = trainer
+    # trainer.load_model()
+    # rets = trainer.inference(mode='test')
+    # print(f'test best scores: ' + ' '.join(rets['prints']))
+    # cls.model = trainer
     rets = cls.single_eval(cls.model_tag[0])
     trainer.append_information_file([f'es_metrics: {es_metrics}'])
     trainer.append_information_file(rets['text'])
@@ -70,7 +72,8 @@ def objective_a(trial):
 
 def objective_va(trial):
     dp = DataPooler()
-    es_metrics = trial.suggest_categorical('es_metrics', ['dev_loss', 'pearson'])
+    # es_metrics = trial.suggest_categorical('es_metrics', ['dev_loss', 'pearson'])
+    es_metrics = 'pearson'
     if es_metrics == 'dev_loss':
         vw = ValueWatcher(mode='minimize')
     else:
@@ -120,7 +123,8 @@ def objective_va(trial):
 
 def objective_s2s(trial):
     dp = DataPooler()
-    es_metrics = trial.suggest_categorical('es_metrics', ['dev_loss', 'pearson'])
+    # es_metrics = trial.suggest_categorical('es_metrics', ['dev_loss', 'pearson'])
+    es_metrics = 'pearson'
     if es_metrics == 'dev_loss':
         vw = ValueWatcher(mode='minimize')
     else:
@@ -174,7 +178,15 @@ def objective_s2s(trial):
 
 if __name__ == '__main__':
     study = optuna.create_study(direction='maximize')  # Create a new study.
-    study.optimize(objective_a, n_trials=100)  # Invoke optimization of the objective function.
+
+    if args.model == 'att':
+        objective = objective_a
+    elif args.model == 'vatt':
+        objective = objective_va
+    elif args.model == 'seq':
+        objective = objective_s2s
+
+    study.optimize(objective, n_trials=100)  # Invoke optimization of the objective function.
 
 
 
