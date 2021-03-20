@@ -50,6 +50,12 @@ class ValueWatcher:
         self.epoch += 1
 
     def is_over(self):
+        if self.threshold == -1:
+            return True
+
+        if self.epoch >= 20:
+            return True
+
         if self.mode == 'maximize':
             return self.is_max
         elif self.mode == 'minimize':
