@@ -39,7 +39,7 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
             self.attention = nn.MultiheadAttention(embed_dim=sum(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
-        self.weight_decay = 0.0001
+        self.weight_decay = 1e-4
         self.parameters = list(self.attention.parameters())
 
         super().__init__()
@@ -64,7 +64,9 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
                 sentence_embeddings.append(sentence_embedding)
                 attention_weights.append(attention_weight)
 
-            loss = (torch.dot(sentence_embeddings[0].squeeze(0), sentence_embeddings[1].squeeze(0)) - score) ** 2
+            # loss = (torch.dot(*sentence_embeddings) - score) ** 2
+            cosine_similarity = self.cos(sentence_embeddings[0].squeeze(0), sentence_embeddings[1].squeeze(0))
+            loss = torch.square(cosine_similarity - (2 * score - 1))
             losses.append(loss)
 
             if with_calc_similality:

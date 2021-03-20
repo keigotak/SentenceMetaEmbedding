@@ -44,10 +44,10 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.vector_attention = {model: self.vector_attention[model] / sum(self.vector_attention[model]) for model in self.model_names}
         self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
 
-        self.learning_ratio = 0.001
+        self.learning_ratio = 0.01
         self.gradient_clip = 0.2
-        self.weight_decay = 0.001
-        self.with_vector_attention = True
+        self.weight_decay = 1e-4
+        self.with_vector_attention = False
         if self.with_vector_attention:
             self.parameters = list(self.vector_attention.values()) + list(self.projection_matrices.values())
         else:
@@ -72,7 +72,9 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
                 pooled_sentence_embedding = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names})
                 sentence_embeddings.append(pooled_sentence_embedding)
 
-            loss = (torch.dot(*sentence_embeddings) - score) ** 2
+            # loss = (torch.dot(*sentence_embeddings) - score) ** 2
+            cosine_similarity = self.cos(sentence_embeddings[0], sentence_embeddings[1])
+            loss = torch.square(cosine_similarity - (2 * score - 1))
             losses.append(loss)
 
             if with_calc_similality:
@@ -124,7 +126,9 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         elif self.sentence_pooling_method == 'max':
             pooled_sentence_embedding, _ = torch.max(torch.stack(pooled_word_embeddings), dim=0)
 
-        pooled_sentence_embedding = pooled_sentence_embedding / torch.sum(pooled_sentence_embedding)
+        # L2 normを計算してここで割る
+        # torch.dev(pooled_sentence_embedding, torch.norm(pooled_sentence_embedding))
+        # pooled_sentence_embedding = pooled_sentence_embedding / torch.sum(pooled_sentence_embedding)
 
         return pooled_sentence_embedding
 
