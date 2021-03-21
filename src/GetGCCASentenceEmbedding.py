@@ -11,7 +11,7 @@ class GetGCCASentenceEmbedding(AbstractGetSentenceEmbedding):
         self.output_file_name = 'gcca.txt'
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.tag = '03212021123729652443' # 03202021141734594041
+        self.tag = '03212021131015347692' # 03202021141734594041
 
         self.indexer = None
 

@@ -19,6 +19,7 @@ class GCCA:
         self.mean_vector = None
         self.std_vector = None
         self.dim = None
+        self.tau = 0.1
 
     def centering(self, x):
         '''
@@ -47,7 +48,6 @@ class GCCA:
         :return: None
         '''
         centerized_vectors = [self.centering(vector) for vector in vectors]  # centerized by average for each column
-        div_vectors = [self.get_variance(vector) for vector in centerized_vectors]
 
         ## getting covariance matrix for each src embedding pair of
         covariance_matrices = [] # dict にする
@@ -57,12 +57,14 @@ class GCCA:
                 for k in range(len(centerized_vectors[0])):  # for batch sentences
                     cm_sum += self.get_covariance_matrics(centerized_vectors[i][k], centerized_vectors[j][k])
                 cm_sum /= len(centerized_vectors[0]) # 求めるのは期待値なので数で割る必要がある
+                if i == j:
+                    cm_sum = cm_sum + self.tau * self.std_vector[j] * np.eye(cm_sum.shape[0])
                 covariance_matrices.append(cm_sum.tolist())
 
         ## unpacking covariance_matrices to allocate diagonal matrix and other components, separately.
         ## ここの実装はスピードが遅ければ見直す
-        cross_vectors_a = []
-        cross_vectors_b = []
+        cross_vectors_a = [] # diagonal
+        cross_vectors_b = [] # not diagonal
         flg_new_row = False
         flg_diagonal = False
         col, previous_dim = 0, 0
@@ -128,7 +130,7 @@ class GCCA:
             m = np.mean(vectors, axis=0)
             mean_vectors.append(m.copy())
             s = np.std(vectors, axis=0)
-            std_vectors.append(s.copy())
+            std_vectors.append(np.mean(s).copy())
         self.mean_vector = mean_vectors
         self.std_vector = std_vectors
 
@@ -169,12 +171,12 @@ if __name__ == '__main__':
 
     gcca = GCCA()
     print(gcca.get_covariance_matrics(x1, x2))
+    gcca.prepare([x1, x2])
+
     gcca.fit([x1, x2])
 
     print(gcca.eta)
     print(gcca.eta[0].shape)
     print(gcca.eta[1].shape)
-
-    gcca.prepare([x1, x2])
 
     gcca.transform([x1, x2])
