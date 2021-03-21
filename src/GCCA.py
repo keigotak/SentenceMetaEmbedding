@@ -17,7 +17,8 @@ class GCCA:
 
         self.eta = None
         self.mean_vector = None
-        self.dim = 1024
+        self.std_vector = None
+        self.dim = None
 
     def centering(self, x):
         '''
@@ -65,7 +66,7 @@ class GCCA:
         flg_new_row = False
         flg_diagonal = False
         col, previous_dim = 0, 0
-        zero = 0.0
+        zero = 1e-10
         for i, cm in enumerate(covariance_matrices):  ## for each covariance matrix
             if i % len(vectors) == 0:
                 flg_new_row = True
@@ -112,7 +113,7 @@ class GCCA:
             self.eta = eigen_vectors_real_part[:self.dim]
         else:
             self.eta = eigen_vectors_real_part  ## dim: d1 + d2, d1 + d2
-        self.eta = [self.eta[:, :len(vectors[0][0])], self.eta[:, len(vectors[0][0]):]]
+        # self.eta = [self.eta[:, :len(vectors[0][0])], self.eta[:, len(vectors[0][0]):]]
 
 
     def prepare(self, all_vectors):
@@ -120,28 +121,30 @@ class GCCA:
         :param vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
         :return: transformed vectors
         '''
-        rets = []
+        mean_vectors = []
+        std_vectors = []
 
         for vectors in all_vectors:
             m = np.mean(vectors, axis=0)
-            rets.append(m)
-        self.mean_vector = rets
+            mean_vectors.append(m.copy())
+            s = np.std(vectors, axis=0)
+            std_vectors.append(s.copy())
+        self.mean_vector = mean_vectors
+        self.std_vector = std_vectors
 
     def transform(self, vectors):
         '''
         :param vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
-        :return: transformed vectors
+        :return: transformed vectors axis0: batch size, axis1: meta embedding dim
         '''
         rets = []
 
         batch_size = len(vectors[0])
         for b in range(batch_size):
-            projected_centerlized_inputs = []
+            tmp = []
             for i in range(len(vectors)):
-                centerlized_input = vectors[i][b] - self.mean_vector[i]
-                projected_centerlized_inputs.append(np.einsum('pq, r->p', self.eta[i], centerlized_input))
-            summed_projected_centerlized_inputs = sum(projected_centerlized_inputs)
-            rets.append(summed_projected_centerlized_inputs.tolist())
+                tmp.extend(vectors[i][b] - self.mean_vector[i]) # same as Poerner et al 2019 EMNLP https://www.aclweb.org/anthology/D19-1173.pdf
+            rets.append(np.dot(self.eta, tmp).tolist())
         return np.array(rets)
 
     def save_model(self):

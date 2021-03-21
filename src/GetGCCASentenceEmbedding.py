@@ -11,7 +11,7 @@ class GetGCCASentenceEmbedding(AbstractGetSentenceEmbedding):
         self.output_file_name = 'gcca.txt'
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.tag = '03202021143248394793'
+        self.tag = '03212021123729652443' # 03202021141734594041
 
         self.indexer = None
 
@@ -43,9 +43,10 @@ class GetGCCASentenceEmbedding(AbstractGetSentenceEmbedding):
 if __name__ == '__main__':
     cls = GetGCCASentenceEmbedding()
     for model_name in cls.model_names:
-        cls.single_eval(model_name)
+        rets = cls.single_eval(model_name)
         if cls.with_reset_output_file:
             cls.with_reset_output_file = False
+        print('\n'.join(rets['text']))
 
 
 

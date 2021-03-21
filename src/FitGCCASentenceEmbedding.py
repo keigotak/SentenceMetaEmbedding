@@ -56,6 +56,7 @@ for i, sentence in enumerate(sentences):
 # b = np.array([0., 1.])
 
 tag = get_now()
+print(tag)
 
 gcca = GCCA(tag=tag)
 gcca.prepare(vectors)
