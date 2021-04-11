@@ -2,7 +2,7 @@ import pickle
 from pathlib import Path
 
 from HelperFunctions import get_now
-from GCCA import GCCA
+from SVD import SVD
 
 
 # model_pkls = ["../models/sentence_embeddings_bert-large-nli-stsb-mean-tokens.pkl",
@@ -59,14 +59,14 @@ for i, sentence in enumerate(sentences):
 tag = get_now()
 print(tag)
 
-gcca = GCCA(tag=tag)
-gcca.prepare(vectors)
-gcca.fit(vectors)
-gcca.save_model()
-gcca_vectors = gcca.transform(vectors)
-with Path(f'../models/gcca_{tag}.pkl').open('wb') as f:
-    pickle.dump(gcca_vectors, f)
-with Path(f'../models/gcca_{tag}_sentence_indexer.pkl').open('wb') as f:
+svd = SVD(tag=tag)
+svd.prepare(vectors)
+svd.fit(vectors)
+svd.save_model()
+svd_vectors = svd.transform(vectors)
+with Path(f'../models/svd_{tag}.pkl').open('wb') as f:
+    pickle.dump(svd_vectors, f)
+with Path(f'../models/svd_{tag}_sentence_indexer.pkl').open('wb') as f:
     pickle.dump(sentence_to_index, f)
 
 

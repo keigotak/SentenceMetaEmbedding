@@ -1,6 +1,7 @@
 import os
 import torch
 import numpy as np
+from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 from AbstractGetSentenceEmbedding import *
@@ -13,6 +14,9 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         self.device = get_device(device)
         self.model_name = model_name
         self.model = SentenceTransformer(model_name, device=self.device)
+        # self.model.device = self.device
+        self.model.to(self.device)
+        self.model.eval()
         self.tokenizer = self.model.tokenizer
         self.tokenization_mode = 'subword'
         self.subword_pooling_method = 'avg'
@@ -21,6 +25,30 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
 
         self.tag = get_now()
         self.information_file = f'../results/sberts/info-{self.tag}.txt'
+
+        # self.embeddings_path = Path(f'./sentence_embeddings/{model_name}-{self.tokenization_mode}-{self.subword_pooling_method}-embeddings.txt')
+        # self.indexer_path = Path(f'./sentence_embeddings/{model_name}-{self.tokenization_mode}-{self.subword_pooling_method}-indexer.txt')
+        #
+        # self.cached_embeddings = {}
+        # if self.embeddings_path.exists():
+        #     with self.embeddings_path.open('r') as f:
+        #         for t in f.readlines():
+        #             lines = t.strip().split('\t')
+        #             self.cached_embeddings[lines[0]] = [list(map(float, l.split(' '))) for l in lines[1:]] # key is sentID
+        # else:
+        #     self.embeddings_path.touch()
+        #
+        # self.sent_to_id = {}
+        # if self.indexer_path.exists():
+        #     with self.indexer_path.open('r') as f:
+        #         for t in f.readlines():
+        #             sentID, sentence = t.strip().split('\t')
+        #             self.sent_to_id[sentence] = sentID
+        # else:
+        #     self.indexer_path.touch()
+        #
+        # self.sentence_id = len(self.sent_to_id)
+
 
     def get_ids(self, sent):
         ids_sent = self.tokenizer(sent, return_tensors="pt")
@@ -53,7 +81,7 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
             if len(subword_positions) > 1:
                 subword_embeddings = []
                 for subword_position in subword_positions:
-                    subword_embeddings.append(torch.FloatTensor(embeddings[subword_position]).requires_grad_(False))
+                    subword_embeddings.append(embeddings[subword_position].requires_grad_(False))
                 # subword pooling
                 if self.subword_pooling_method == 'avg':
                     pooled_subword_embedding = torch.mean(torch.stack(subword_embeddings), dim=0)
@@ -61,10 +89,18 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
                     pooled_subword_embedding, _ = torch.max(torch.stack(subword_embeddings), dim=0)
                 subword_aggregated_embeddings.append(pooled_subword_embedding)
             else:
-                subword_aggregated_embeddings.append(torch.FloatTensor(embeddings[subword_positions[0]]).requires_grad_(False))
+                if len(subword_positions) == 0:
+                    subword_aggregated_embeddings.append(torch.zeros_like(embeddings[0]).requires_grad_(False))
+                else:
+                    subword_aggregated_embeddings.append(embeddings[subword_positions[0]].requires_grad_(False))
         return torch.stack(subword_aggregated_embeddings, dim=0)
 
     def get_word_embedding(self, sentence):
+        # if sentence in self.sent_to_id.keys():
+        #     embedding = [self.cached_embeddings[self.sent_to_id[sentence]]]
+        #     tokens = [sentence.split(' ')]
+        #     return {'ids': None, 'tokens': tokens, 'embeddings': embedding}
+
         ids_sent1 = self.get_ids(sentence)
         ids = [ids_sent1]
 
@@ -76,23 +112,39 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
             emb_sent1 = self.process_subword(sentence, emb_sent1)
         embedding = [emb_sent1.squeeze(0).tolist()]
 
+        # with self.embeddings_path.open('a') as f:
+        #     line = f'SID{self.sentence_id}\t' + '\t'.join([' '.join([str(e) for e in es]) for es in embedding[0]]) + '\n'
+        #     f.write(line)
+        #
+        # with self.indexer_path.open('a') as f:
+        #     line = f'SID{self.sentence_id}\t{sentence}\n'
+        #     f.write(line)
+        # self.sentence_id += 1
+
         return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
 
     def get_word_embeddings(self, sent1, sent2):
-        ids_sent1 = self.get_ids(sent1)
-        ids_sent2 = self.get_ids(sent2)
-        ids = [ids_sent1, ids_sent2]
+        ids, tokens, embedding = [], [], []
+        for sent in [sent1, sent2]:
+            rets = self.get_word_embedding(sent)
+            ids.extend(rets['ids'])
+            tokens.extend(rets['tokens'])
+            embedding.extend(rets['embeddings'])
 
-        tokens_sent1 = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
-        tokens_sent2 = self.tokenizer.convert_ids_to_tokens(ids_sent2.data['input_ids'][0])
-        tokens = [tokens_sent1, tokens_sent2]
-
-        emb_sent1 = self.model.encode(sent1, output_value='token_embeddings')
-        emb_sent2 = self.model.encode(sent2, output_value='token_embeddings')
-        if self.tokenization_mode == 'subword':
-            emb_sent1 = self.process_subword(sent1, emb_sent1)
-            emb_sent2 = self.process_subword(sent2, emb_sent2)
-        embedding = [emb_sent1.squeeze(0).tolist(), emb_sent2.squeeze(0).tolist()]
+        # ids_sent1 = self.get_ids(sent1)
+        # ids_sent2 = self.get_ids(sent2)
+        # ids = [ids_sent1, ids_sent2]
+        #
+        # tokens_sent1 = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
+        # tokens_sent2 = self.tokenizer.convert_ids_to_tokens(ids_sent2.data['input_ids'][0])
+        # tokens = [tokens_sent1, tokens_sent2]
+        #
+        # emb_sent1 = self.model.encode(sent1, output_value='token_embeddings')
+        # emb_sent2 = self.model.encode(sent2, output_value='token_embeddings')
+        # if self.tokenization_mode == 'subword':
+        #     emb_sent1 = self.process_subword(sent1, emb_sent1)
+        #     emb_sent2 = self.process_subword(sent2, emb_sent2)
+        # embedding = [emb_sent1.squeeze(0).tolist(), emb_sent2.squeeze(0).tolist()]
 
         return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
 

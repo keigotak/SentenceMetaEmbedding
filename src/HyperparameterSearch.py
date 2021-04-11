@@ -26,7 +26,7 @@ def objective_a(trial):
     if es_metrics == 'dev_loss':
         vw = ValueWatcher(mode='minimize')
     else:
-        vw = ValueWatcher(threshold=-1)
+        vw = ValueWatcher(threshold=1)
     cls = EvaluateAttentionModel(device=args.device)
     trainer = TrainAttentionWithSTSBenchmark(args.device)
 
@@ -38,7 +38,7 @@ def objective_a(trial):
     hyper_params['source_pooling_method'] = trial.suggest_categorical('source_pooling_method', ['avg', 'concat'])
     hyper_params['sentence_pooling_method'] = trial.suggest_categorical('sentence_pooling_method', ['avg', 'max'])
     hyper_params['learning_ratio'] = trial.suggest_float('learning_ratio', 1e-5, 1e-1, log=True)
-    hyper_params['gradient_clip'] = trial.suggest_float('gradient_clip', 1e-2, 100, log=True)
+    hyper_params['gradient_clip'] = trial.suggest_float('gradient_clip', 1e-1, 10.0, log=True)
     hyper_params['weight_decay'] = trial.suggest_float('weight_decay', 1e-5, 1e-1, log=True)
     hyper_params['batch_size'] = trial.suggest_int('batch_size', 128, 2048, step=2)
     trainer.update_hyper_parameters(hyper_params)
@@ -48,26 +48,28 @@ def objective_a(trial):
         trainer.train_epoch()
         trainer.datasets['train'].reset(with_shuffle=True)
         rets = trainer.inference(mode='dev')
-        if es_metrics == 'pearson':
-            vw.update(rets[es_metrics][0])
-        else:
-            vw.update(rets[es_metrics])
+        vw.update(rets[es_metrics])
         if vw.is_updated():
             trainer.save_model()
             dp.set('best-epoch', vw.epoch)
             dp.set('best-score', vw.max_score)
         dp.set(f'scores', rets)
-    # print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+    print(f'dev best scores: {trainer.get_round_score(dp.get_best("best-score")) :.2f}')
 
-    # trainer.load_model()
-    # rets = trainer.inference(mode='test')
-    # print(f'test best scores: ' + ' '.join(rets['prints']))
-    # cls.model = trainer
-    rets = cls.single_eval(cls.model_tag[0])
+    trainer.load_model()
+    test_rets = trainer.inference(mode='test')
+    print(f'test best scores: ' + ' '.join(test_rets['prints']))
+    cls.model = trainer
+    eval_rets = cls.single_eval(cls.model_tag[0])
     trainer.append_information_file([f'es_metrics: {es_metrics}'])
-    trainer.append_information_file(rets['text'])
+    trainer.append_information_file(eval_rets['text'])
 
-    return rets['pearson']
+    eval_rets['best_epoch'] = dp.get_best('best-epoch')
+    eval_rets['dev_pearson'] = dp.get_best("best-score")
+    eval_rets['test_pearson'] = test_rets['pearson']
+    cls.save_summary_writer(eval_rets)
+
+    return eval_rets['pearson']
 
 
 def objective_va(trial):
@@ -79,6 +81,7 @@ def objective_va(trial):
     else:
         vw = ValueWatcher()
     cls = EvaluateVectorAttentionModel(device=args.device)
+    cls.model = None
     trainer = TrainVectorAttentionWithSTSBenchmark(args.device)
 
     trainer.model_names = cls.model_names
@@ -91,6 +94,7 @@ def objective_va(trial):
     hyper_params['gradient_clip'] = trial.suggest_float('gradient_clip', 1e-2, 100, log=True)
     hyper_params['weight_decay'] = trial.suggest_float('weight_decay', 1e-5, 1e-1, log=True)
     hyper_params['with_vector_attention'] = trial.suggest_categorical('with_vector_attention', [True, False])
+    hyper_params['loss_mode'] = trial.suggest_categorical('loss_mode', ['cos', 'word'])
     hyper_params['batch_size'] = trial.suggest_int('batch_size', 128, 2048, step=2)
     trainer.update_hyper_parameters(hyper_params)
 
@@ -99,26 +103,28 @@ def objective_va(trial):
         trainer.train_epoch()
         trainer.datasets['train'].reset(with_shuffle=True)
         rets = trainer.inference(mode='dev')
-        if es_metrics == 'pearson':
-            vw.update(rets[es_metrics][0])
-        else:
-            vw.update(rets[es_metrics])
+        vw.update(rets[es_metrics])
         if vw.is_updated():
             trainer.save_model()
             dp.set('best-epoch', vw.epoch)
             dp.set('best-score', vw.max_score)
         dp.set(f'scores', rets)
-    print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+    print(f'dev best scores: {trainer.get_round_score(dp.get_best("best-score")) :.2f}')
 
     trainer.load_model()
-    rets = trainer.inference(mode='test')
-    print(f'test best scores: ' + ' '.join(rets['prints']))
+    test_rets = trainer.inference(mode='test')
+    print(f'test best scores: ' + ' '.join(test_rets['prints']))
     cls.model = trainer
-    rets = cls.single_eval(cls.model_tag[0])
+    eval_rets = cls.single_eval(cls.model_tag[0])
     trainer.append_information_file([f'es_metrics: {es_metrics}'])
-    trainer.append_information_file(rets['text'])
+    trainer.append_information_file(eval_rets['text'])
 
-    return rets['pearson']
+    eval_rets['best_epoch'] = dp.get_best('best-epoch')
+    eval_rets['dev_pearson'] = dp.get_best("best-score")
+    eval_rets['test_pearson'] = test_rets['pearson']
+    cls.save_summary_writer(eval_rets)
+
+    return eval_rets['pearson']
 
 
 def objective_s2s(trial):
@@ -154,26 +160,28 @@ def objective_s2s(trial):
         trainer.train_epoch()
         trainer.datasets['train'].reset(with_shuffle=True)
         rets = trainer.inference(mode='dev')
-        if es_metrics == 'pearson':
-            vw.update(rets[es_metrics][0])
-        else:
-            vw.update(rets[es_metrics])
+        vw.update(rets[es_metrics])
         if vw.is_updated():
             trainer.save_model()
             dp.set('best-epoch', vw.epoch)
             dp.set('best-score', vw.max_score)
         dp.set(f'scores', rets)
-    print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+    print(f'dev best scores: {trainer.get_round_score(dp.get_best("best-score")) :.2f}')
 
     trainer.load_model()
-    rets = trainer.inference(mode='test')
-    print(f'test best scores: ' + ' '.join(rets['prints']))
+    test_rets = trainer.inference(mode='test')
+    print(f'test best scores: ' + ' '.join(test_rets['prints']))
     cls.model = trainer
-    rets = cls.single_eval(cls.model_tag[0])
+    eval_rets = cls.single_eval(cls.model_tag[0])
     trainer.append_information_file([f'es_metrics: {es_metrics}'])
-    trainer.append_information_file(rets['text'])
+    trainer.append_information_file(eval_rets['text'])
 
-    return rets['pearson']
+    eval_rets['best_epoch'] = dp.get_best('best-epoch')
+    eval_rets['dev_pearson'] = dp.get_best("best-score")
+    eval_rets['test_pearson'] = test_rets['pearson']
+    cls.save_summary_writer(eval_rets)
+
+    return eval_rets['pearson']
 
 
 if __name__ == '__main__':

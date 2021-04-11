@@ -6,7 +6,7 @@ from pathlib import Path
 class STSDataset:
     def __init__(self, mode='train'):
         self.current = 0
-        self.batch_size = 4
+        self.batch_size = 128
 
         self.mode = mode
         self.path = None
@@ -20,7 +20,7 @@ class STSDataset:
         with self.path.open('r', encoding='utf-8') as f:
             self.texts = [self.get_data_dict(*line.strip().split('\t')) for line in f.readlines()]
         self.dataset_size = len(self.texts)
-        self.batch_mode = 'fixed' # full, fixed
+        self.batch_mode = 'full' # full, fixed
 
     @staticmethod
     def get_data_dict(genre, filename, year, index, score, sentence1, sentence2):

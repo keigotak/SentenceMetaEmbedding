@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 
 from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
@@ -33,25 +34,31 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.source_pooling_method = 'concat' # avg, concat
         self.sentence_pooling_method = 'avg' # avg, max
 
-        self.projection_matrices = {model: torch.FloatTensor(self.embedding_dims[model], self.embedding_dims[model]).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
-        for model in self.model_names:
-            for i, t in enumerate(self.projection_matrices[model]):
-                t = t / torch.sum(t)
-                self.projection_matrices[model][i] = t
-        self.projection_matrices = {model: self.projection_matrices[model].requires_grad_(True) for model in self.model_names}
+        self.projection_matrices = {model: nn.Linear(self.embedding_dims[model], self.embedding_dims[model], bias=False).to(self.device) for model in self.model_names}
+        self.vector_attention = {model: nn.Linear(self.embedding_dims[model], 1, bias=False).to(self.device) for model in self.model_names}
+        # for model in self.model_names:
+        #     for i, t in enumerate(self.projection_matrices[model]):
+        #         t = t / torch.sum(t)
+        #         self.projection_matrices[model][i] = t
+        # self.projection_matrices = {model: self.projection_matrices[model].requires_grad_(True) for model in self.model_names}
 
-        self.vector_attention = {model: torch.FloatTensor(self.embedding_dims[model]).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
-        self.vector_attention = {model: self.vector_attention[model] / sum(self.vector_attention[model]) for model in self.model_names}
-        self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
+        # self.vector_attention = {model: torch.FloatTensor(self.embedding_dims[model]).uniform_().detach_().to(self.device).requires_grad_(False) for model in self.model_names}
+        # self.vector_attention = {model: self.vector_attention[model] / sum(self.vector_attention[model]) for model in self.model_names}
+        # self.vector_attention = {model: self.vector_attention[model].requires_grad_(True) for model in self.model_names}
 
         self.learning_ratio = 0.01
         self.gradient_clip = 0.2
         self.weight_decay = 1e-4
         self.with_vector_attention = False
+        self.parameters = []
         if self.with_vector_attention:
-            self.parameters = list(self.vector_attention.values()) + list(self.projection_matrices.values())
+            for model in self.model_names:
+                self.parameters.extend(list(self.projection_matrices[model].parameters()))
+                self.parameters.extend(list(self.vector_attention[model].parameters()))
         else:
-            self.parameters = list(self.projection_matrices.values())
+            for model in self.model_names:
+                self.parameters.extend(list(self.projection_matrices[model].parameters()))
+        self.loss_mode = 'cos' # word, cos
 
         super().__init__()
 
@@ -68,13 +75,36 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         losses = []
         for embeddings, score in zip(batch_embeddings, scores):
             sentence_embeddings = []
+            word_embeddings = []
             for i in range(2):  # for input sentences, sentence1 and sentence2
-                pooled_sentence_embedding = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names})
+                pooled_sentence_embedding, word_embedding = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for model_name in self.model_names})
                 sentence_embeddings.append(pooled_sentence_embedding)
+                word_embeddings.append(word_embedding)
 
-            # loss = (torch.dot(*sentence_embeddings) - score) ** 2
-            cosine_similarity = self.cos(sentence_embeddings[0], sentence_embeddings[1])
-            loss = torch.square(cosine_similarity - (2 * score - 1))
+            if self.loss_mode == 'cos':
+                cosine_similarity = self.cos(sentence_embeddings[0], sentence_embeddings[1])
+                loss = torch.square(cosine_similarity - (2 * score - 1))
+            elif self.loss_mode == 'word':
+                # dimensions: sentence, source, words, hidden
+                loss = []
+                for word_embedding in word_embeddings:
+                    words1 = word_embedding['bert-large-nli-stsb-mean-tokens']
+                    words2 = word_embedding['roberta-large-nli-stsb-mean-tokens']
+
+                    sentence_length = words1.shape[0]
+                    for i in range(sentence_length):
+                        for j in range(sentence_length):
+                            if i == j:
+                                loss.append((1. - self.cos(words1[i], words2[j]))) # 同じ文の同じ単語を比較
+                            else:
+                                loss.append((1. + self.cos(words1[i], words2[j]))) # 同じ文の違う単語を比較
+
+                # 違う文の比較　
+                loss.append((1. + self.cos(sentence_embeddings[0], sentence_embeddings[1])))
+
+                # loss の和
+                loss = torch.sum(torch.stack(loss))
+
             losses.append(loss)
 
             if with_calc_similality:
@@ -94,13 +124,22 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         return gs_scores, sys_scores, running_loss
 
     def step(self, feature):
+        # projected_embeddings = {
+        #     model_name: torch.einsum('pq, rs->ps', feature[model_name].to(self.device), self.projection_matrices[model_name]) for
+        #     model_name in self.model_names}
         projected_embeddings = {
-            model_name: torch.einsum('pq, rs->ps', feature[model_name].to(self.device), self.projection_matrices[model_name]) for
-            model_name in self.model_names}
+            model_name: self.projection_matrices[model_name](feature[model_name].to(self.device))
+            for model_name in self.model_names
+        }
+
         if self.with_vector_attention:
+            # word_embeddings = {
+            #     model_name: torch.einsum('pq, r->pr', projected_embeddings[model_name], self.vector_attention[model_name]) for
+            #     model_name in self.model_names}
             word_embeddings = {
-                model_name: torch.einsum('pq, r->pr', projected_embeddings[model_name], self.vector_attention[model_name]) for
-                model_name in self.model_names}
+                model_name: self.vector_attention[model_name](projected_embeddings[model_name])
+                for model_name in self.model_names}
+
         else:
             word_embeddings = projected_embeddings
 
@@ -130,7 +169,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         # torch.dev(pooled_sentence_embedding, torch.norm(pooled_sentence_embedding))
         # pooled_sentence_embedding = pooled_sentence_embedding / torch.sum(pooled_sentence_embedding)
 
-        return pooled_sentence_embedding
+        return pooled_sentence_embedding, word_embeddings
 
     def get_save_path(self, tag):
         return f'../models/vec_attention-{self.tag}-{tag}.pkl'
@@ -168,6 +207,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
             f.write(f'weight_decay: {self.weight_decay}\n')
             f.write(f'batch_size: {self.batch_size}\n')
             f.write(f'with_vector_attention: {self.with_vector_attention}\n')
+            f.write(f'loss_mode: {self.loss_mode}\n')
 
     def set_tag(self, tag):
         self.tag = tag
@@ -182,9 +222,14 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.weight_decay = hyper_params['weight_decay']
         self.with_vector_attention = hyper_params['with_vector_attention']
         if self.with_vector_attention:
-            self.parameters = list(self.vector_attention.values()) + list(self.projection_matrices.values())
+            for model in self.model_names:
+                self.parameters.extend(list(self.projection_matrices[model].parameters()))
+                self.parameters.extend(list(self.vector_attention[model].parameters()))
         else:
-            self.parameters = list(self.projection_matrices.values())
+            for model in self.model_names:
+                self.parameters.extend(list(self.projection_matrices[model].parameters()))
+
+        self.loss_mode = hyper_params['loss_mode']
 
         super().__init__()
 
@@ -220,7 +265,7 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
                     rets = self.model.source[model_name].get_word_embedding(' '.join(sentence))
                     embeddings[model_name] = rets['embeddings'][0]
 
-                sentence_embedding = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
+                sentence_embedding, _ = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in
                                self.model_names})
                 sentence_embeddings.append(sentence_embedding.tolist())
 
@@ -229,6 +274,30 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
     def set_tag(self, tag):
         self.model_tag[0] = f'{self.model_tag[0]}-{tag}'
         self.tag = tag
+
+    def save_summary_writer(self, rets):
+        sw = SummaryWriter('runs/VectorAttention')
+
+        hp = {'source': ','.join(self.model.model_names),
+              'tokenization_mode': self.model.tokenization_mode,
+              'subword_pooling_method': self.model.subword_pooling_method,
+              'source_pooling_method': self.model.source_pooling_method,
+              'sentence_pooling_method': self.model.sentence_pooling_method,
+              'learning_ratio': self.model.learning_ratio,
+              'gradient_clip': self.model.gradient_clip,
+              'weight_decay': self.model.weight_decay,
+              'batch_size': self.model.batch_size,
+              'with_vector_attention': self.model.with_vector_attention,
+              'loss_mode': self.model.loss_mode,
+              'tag': self.tag,
+              'best_epoch': rets['best_epoch']}
+        metrics = {'dev_pearson': rets['dev_pearson'],
+                   'test_pearson': rets['test_pearson'],
+                   'wpearson': rets['pearson'],
+                   'wspearman': rets['spearman']}
+        sw.add_hparams(hparam_dict=hp, metric_dict=metrics)
+        sw.close()
+
 
 if __name__ == '__main__':
     import argparse
@@ -243,12 +312,13 @@ if __name__ == '__main__':
     with_senteval = True
     if with_senteval:
         dp = DataPooler()
-        es_metrics = 'dev_loss'
+        es_metrics = 'pearson'
         if es_metrics == 'dev_loss':
             vw = ValueWatcher(mode='minimize')
         else:
             vw = ValueWatcher()
         cls = EvaluateVectorAttentionModel(device=args.device)
+        cls.model = None
         trainer = TrainVectorAttentionWithSTSBenchmark(args.device)
 
         trainer.model_names = cls.model_names
@@ -260,7 +330,7 @@ if __name__ == '__main__':
             trainer.datasets['train'].reset(with_shuffle=True)
             rets = trainer.inference(mode='dev')
             if es_metrics == 'pearson':
-                vw.update(rets[es_metrics][0])
+                vw.update(rets[es_metrics])
             else:
                 vw.update(rets[es_metrics])
             if vw.is_updated():

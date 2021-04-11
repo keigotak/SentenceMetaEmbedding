@@ -17,3 +17,6 @@ class DataPooler:
             return self.pools
         else:
             return self.pools[key]
+
+    def get_best(self, key=None):
+        return self.pools[key][-1]

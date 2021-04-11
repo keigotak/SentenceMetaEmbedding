@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 
 from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
@@ -20,6 +21,18 @@ from DataPooler import DataPooler
 from HelperFunctions import set_seed, get_now, get_device
 
 
+class Attention(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout, device):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout).to(device)
+
+    def forward(self, tensor, key_padding_mask=None):
+        if key_padding_mask is not None:
+            return self.attention(query=tensor, key=tensor, value=tensor, key_padding_mask=key_padding_mask)
+        else:
+            return self.attention(query=tensor, key=tensor, value=tensor)
+
+
 class TrainAttentionWithSTSBenchmark(AbstractTrainer):
     def __init__(self, device='cpu'):
         self.device = get_device(device)
@@ -27,20 +40,28 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
         self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024}
         self.source = {model: GetSentenceBertWordEmbedding(model, device=self.device) if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']) else GetHuggingfaceWordEmbedding(model) for model in self.model_names}
         self.embedding_dims = [self.model_dims[model] for model in self.model_names]
-        self.attention_head_num = 1
+        self.attention_head_num = 8
         self.dropout_ratio = 0.2
         self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
         self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
-        self.source_pooling_method = 'concat'      # avg, concat
+        self.source_pooling_method = 'avg'      # avg, concat
         self.sentence_pooling_method = 'avg'    # avg, concat, max
         if self.source_pooling_method == 'avg':
-            self.attention = nn.MultiheadAttention(embed_dim=max(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
+            self.attention = Attention(embed_dim=max(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio, device=self.device)
+            # self.attention = nn.MultiheadAttention(embed_dim=max(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
         elif self.source_pooling_method == 'concat':
-            self.attention = nn.MultiheadAttention(embed_dim=sum(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
+            self.attention = Attention(embed_dim=sum(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio, device=self.device)
+            # self.attention = nn.MultiheadAttention(embed_dim=sum(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
+
+        # self.output = nn.Linear(sum(self.embedding_dims), sum(self.embedding_dims)).to(self.device)
+
         self.learning_ratio = 0.01
-        self.gradient_clip = 0.2
+        self.gradient_clip = 0.0
         self.weight_decay = 1e-4
-        self.parameters = list(self.attention.parameters())
+        self.parameters = self.attention.parameters()
+
+        for k, v in self.attention.named_parameters():
+            print("{}, {}, {}".format(v.requires_grad, v.size(), k))
 
         super().__init__()
 
@@ -55,45 +76,71 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
             self.optimizer.zero_grad()
 
         gs_scores, sys_scores = [], []
-        losses = []
-        for embeddings, score in zip(batch_embeddings, scores):
-            sentence_embeddings, attention_weights, normalized_outputs = [], [], []
-            for i in range(2):  # for input sentences, sentence1 and sentence2
-                sentence_embedding, attention_weight = self.step({model_name: torch.FloatTensor(embeddings[model_name][i]) for
-                    model_name in self.model_names})
-                sentence_embeddings.append(sentence_embedding)
-                attention_weights.append(attention_weight)
+        padded_sequences = {model_name: [] for model_name in self.model_names}
+        padding_masks = {model_name: [] for model_name in self.model_names}
+        for model_name in self.model_names:
+            for i in range(2):
+                padded_sequences[model_name].append(
+                    torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items[i])
+                                                     for items in [embs[model_name]
+                                                                   for embs in batch_embeddings]], batch_first=True)
+                )
 
-            # loss = (torch.dot(*sentence_embeddings) - score) ** 2
-            cosine_similarity = self.cos(sentence_embeddings[0].squeeze(0), sentence_embeddings[1].squeeze(0))
-            loss = torch.square(cosine_similarity - (2 * score - 1))
-            losses.append(loss)
+                max_sentence_length = max([len(items[i]) for items in [embs[model_name] for embs in batch_embeddings]])
+                padding_masks[model_name].append(
+                    torch.BoolTensor([[[False] * len(embs[model_name][i]) + [True] * (max_sentence_length - len(embs[model_name][i])) ] for embs in batch_embeddings]).squeeze(1)
+                )
 
-            if with_calc_similality:
-                sys_score = self.similarity(sentence_embeddings[0].squeeze(0).tolist(), sentence_embeddings[1].squeeze(0).tolist())
-                sys_scores.append(sys_score)
-                gs_scores.append(score)
+        sentence_embeddings, attention_weights, normalized_outputs = [], [], []
+        for i in range(2):  # for input sentences, sentence1 and sentence2
+            sentence_embedding, attention_weight = self.step({model_name: padded_sequences[model_name][i] for model_name in self.model_names},
+                                                             padding_mask={model_name: padding_masks[model_name][i] for model_name in self.model_names})
+            sentence_embeddings.append(sentence_embedding)
+            attention_weights.append(attention_weight)
 
-            running_loss += loss.item()
+
+        # loss = (torch.dot(*sentence_embeddings) - score) ** 2
+        cosine_similarity = self.cos1(sentence_embeddings[0], sentence_embeddings[1])
+        loss = torch.square(cosine_similarity - (2 * torch.FloatTensor(scores).to(self.device) - 1.))
+        loss = torch.mean(loss)
+
+        if with_calc_similality:
+            sys_score = [self.similarity(e1, e2) for e1, e2 in zip(sentence_embeddings[0].tolist(), sentence_embeddings[1].tolist())]
+            sys_scores.extend(sys_score)
+            gs_scores.extend(scores)
+
+        running_loss = loss.item()
+        print(running_loss)
 
         if with_training:
-            loss = torch.mean(torch.stack(losses))
             loss.backward()
-            if self.gradient_clip > 0:
+            if self.gradient_clip > 0.:
                 nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
 
         return gs_scores, sys_scores, running_loss
 
-    def step(self, feature):
+    def step(self, feature, padding_mask=None):
         if self.source_pooling_method == 'avg':
-            pooled_feature = torch.mean(torch.stack([torch.FloatTensor(feature[model_name]).to(self.device) for model_name in self.model_names]),
-                                       dim=0).unsqueeze(0).transpose(0, 1)
+            pooled_feature = torch.mean(torch.stack([torch.FloatTensor(feature[model_name]).to(self.device)
+                                                     for model_name in self.model_names]), dim=0).transpose(0, 1)
+            if padding_mask is not None:
+                pooled_padding_mask = padding_mask[self.model_names[0]].to(self.device)
         elif self.source_pooling_method == 'concat':
-            pooled_feature = torch.cat([torch.FloatTensor(feature[model_name]).to(self.device) for model_name in self.model_names],
-                                       dim=1).unsqueeze(0).transpose(0, 1)
-        attention_output, attention_weight = self.attention(pooled_feature, pooled_feature, pooled_feature)
+            pooled_feature = torch.cat([torch.FloatTensor(feature[model_name]).to(self.device)
+                                        for model_name in self.model_names], dim=1).transpose(0, 1)
+            if padding_mask is not None:
+                pooled_padding_mask = torch.cat([padding_mask[model_name].to(self.device) for model_name in self.model_names], dim=1)
+            else:
+                pooled_padding_mask = None
+        if padding_mask is not None:
+            attention_output, attention_weight = self.attention(tensor=pooled_feature, key_padding_mask=pooled_padding_mask)
+        else:
+            attention_output, attention_weight = self.attention(tensor=pooled_feature)
+        # attention_output, attention_weight = self.attention(query=pooled_feature, key=pooled_feature, value=pooled_feature)
+        # attention_output, attention_weight = pooled_feature, None
         attention_output = attention_output.transpose(0, 1)
+        # attention_output = self.output(attention_output)
 
         if self.sentence_pooling_method == 'avg':
             pooled_sentence_embedding = torch.mean(attention_output, dim=1)
@@ -186,11 +233,34 @@ class EvaluateAttentionModel(AbstractGetSentenceEmbedding):
                     embeddings[model_name] = rets['embeddings'][0]
 
                 # get attention output
-                sentence_embedding, attention_weight = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]) for model_name in self.model_names})
+                sentence_embedding, attention_weight = self.model.step({model_name: torch.FloatTensor(embeddings[model_name]).unsqueeze(0) for model_name in self.model_names})
                 sentence_embeddings.append(sentence_embedding.squeeze(0).tolist())
                 attention_weights.append(attention_weight)
 
         return np.array(sentence_embeddings)
+
+    def save_summary_writer(self, rets):
+        sw = SummaryWriter('runs/Attention')
+
+        hp = {'source': ','.join(self.model.model_names),
+              'attention_head_num': self.model.attention_head_num,
+              'attention_dropout_ratio': self.model.dropout_ratio,
+              'tokenization_mode': self.model.tokenization_mode,
+              'subword_pooling_method': self.model.subword_pooling_method,
+              'source_pooling_method': self.model.source_pooling_method,
+              'sentence_pooling_method': self.model.sentence_pooling_method,
+              'learning_ratio': self.model.learning_ratio,
+              'gradient_clip': self.model.gradient_clip,
+              'weight_decay': self.model.weight_decay,
+              'batch_size': self.model.batch_size,
+              'tag': self.tag,
+              'best_epoch': rets['best_epoch']}
+        metrics = {'dev_pearson': rets['dev_pearson'],
+                   'test_pearson': rets['test_pearson'],
+                   'wpearson': rets['pearson'],
+                   'wspearman': rets['spearman']}
+        sw.add_hparams(hparam_dict=hp, metric_dict=metrics)
+        sw.close()
 
 
 if __name__ == '__main__':
@@ -208,30 +278,36 @@ if __name__ == '__main__':
         dp = DataPooler()
         vw = ValueWatcher()
         cls = EvaluateAttentionModel(device=args.device)
-        trainer = TrainAttentionWithSTSBenchmark(device=args.device)
+        trainer = cls.model # TrainAttentionWithSTSBenchmark(device=args.device)
 
-        trainer.model_names = cls.model_names
-        trainer.set_tag(cls.tag)
+        # trainer.model_names = cls.model_names
+        # trainer.set_tag(cls.tag)
+        print(cls.tag)
 
         while not vw.is_over():
             print(f'epoch: {vw.epoch}')
-            trainer.train_epoch()
-            trainer.datasets['train'].reset(with_shuffle=True)
-            rets = trainer.inference(mode='dev')
-            vw.update(rets['pearson'][0])
+            cls.model.train_epoch()
+            cls.model.datasets['train'].reset(with_shuffle=True)
+            dev_rets = cls.model.inference(mode='dev')
+            vw.update(dev_rets['pearson'])
             if vw.is_updated():
-                trainer.save_model()
+                cls.model.save_model()
                 dp.set('best-epoch', vw.epoch)
                 dp.set('best-score', vw.max_score)
-            dp.set(f'scores', rets)
-        print(f'dev best scores: {trainer.get_round_score(dp.get("best-score")[-1]) :.2f}')
+            dp.set(f'scores', dev_rets)
+        print(f'dev best scores: {cls.model.get_round_score(dp.get("best-score")[-1]) :.2f}')
 
-        trainer.load_model()
-        rets = trainer.inference(mode='test')
-        print(f'test best scores: ' + ' '.join(rets['prints']))
-        cls.model = trainer
-        rets = cls.single_eval(cls.model_tag[0])
-        trainer.append_information_file(rets['text'])
+        cls.model.load_model()
+        test_rets = cls.model.inference(mode='test')
+        print(f'test best scores: ' + ' '.join(test_rets['prints']))
+        # cls.model = trainer
+        eval_rets = cls.single_eval(cls.model_tag[0])
+        cls.model.append_information_file(eval_rets['text'])
+
+        eval_rets['best_epoch'] = dp.get('best-epoch')
+        eval_rets['dev_pearson'] = dp.get("best-score")[-1]
+        eval_rets['test_pearson'] = test_rets['pearson']
+        # cls.save_summary_writer(eval_rets)
     else:
         trainer = TrainAttentionWithSTSBenchmark(device=args.device)
         trainer.train()

@@ -26,9 +26,10 @@ class AbstractTrainer:
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
         self.tag = get_now()
-        self.cos = nn.CosineSimilarity(dim=0)
+        self.cos0 = nn.CosineSimilarity(dim=0)
+        self.cos1 = nn.CosineSimilarity(dim=1)
 
-    def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
+    def batch_step(self, batch_embeddings, scores, tokens, with_training=False, with_calc_similality=False):
         raise NotImplementedError
 
     def step(self, feature):
@@ -45,15 +46,19 @@ class AbstractTrainer:
 
             ## get vector representation for each embedding and batch data
             batch_embeddings = []
+            batch_tokens = []
             with torch.no_grad():
                 for sent1, sent2 in zip(sentences1, sentences2):
                     embeddings = {}
+                    tokens = {}
                     for model_name in self.model_names:
                         rets = self.source[model_name].get_word_embeddings(sent1, sent2)
                         if False:
                             print('\t'.join([' '.join(items) for items in rets['tokens']]))
                         embeddings[model_name] = rets['embeddings']
+                        tokens[model_name] = rets['tokens']
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
+                    batch_tokens.append(tokens)
 
             ## get attention output
             _, _, _ = self.batch_step(batch_embeddings, scores, with_training=True)
@@ -66,11 +71,14 @@ class AbstractTrainer:
         if with_pbar:
             pbar.close()
 
-    def train(self, num_epoch=10):
+    def train(self, num_epoch=100):
         vw = ValueWatcher()
         for i in range(num_epoch):
             self.train_epoch()
-            self.datasets['train'].reset(with_shuffle=True)
+            if self.datasets['train'].batch_mode == 'fixed' and self.datasets['train'].current >= self.datasets['train'].dataset_size:
+                self.datasets['train'].reset(with_shuffle=True)
+            elif self.datasets['train'].batch_mode == 'full':
+                self.datasets['train'].reset(with_shuffle=True)
             rets = self.inference('dev')
 
             vw.update(rets['pearson'][0])
@@ -80,14 +88,16 @@ class AbstractTrainer:
     def inference(self, mode='dev'):
         running_loss = 0.0
         results = {}
-        sys_scores, gs_scores = [], []
+        pearsonrs, spearmanrs = [], []
 
         # batch loop
         while not self.datasets[mode].is_batch_end():
+            sys_scores, gs_scores = [], []
             sentences1, sentences2, scores = self.datasets[mode].get_batch()
 
             # get vector representation for each embedding
             batch_embeddings = []
+            batch_tokens = []
             with torch.no_grad():
                 for sent1, sent2 in zip(sentences1, sentences2):
                     embeddings = {}
@@ -97,21 +107,27 @@ class AbstractTrainer:
                             print('\t'.join([' '.join(items) for items in rets['tokens']]))
                         embeddings[model_name] = rets['embeddings']
                     batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
+                    batch_tokens.append([sent1.split(' '), sent2.split(' ')])
 
                 # get attention output
                 gs, sys, loss = self.batch_step(batch_embeddings, scores, with_calc_similality=True)
                 sys_scores.extend(sys)
                 gs_scores.extend(gs)
                 running_loss += loss
+            pearsonrs.append(pearsonr(sys_scores, gs_scores)[0])
+            spearmanrs.append(spearmanr(sys_scores, gs_scores)[0])
 
-        results = {'pearson': pearsonr(sys_scores, gs_scores),
-                   'spearman': spearmanr(sys_scores, gs_scores),
+        avg_pearsonr = np.average(pearsonrs)
+        avg_spearmanr = np.average(spearmanrs)
+
+        results = {'pearson': avg_pearsonr,
+                   'spearman': avg_spearmanr,
                    'nsamples': len(sys_scores),
                    'dev_loss': running_loss}
 
         print_contents = [f'STSBenchmark-{mode}',
-                          f'pearson: {self.get_round_score(results["pearson"][0]) :.2f}',
-                          f'spearman: {self.get_round_score(results["spearman"][0]) :.2f}']
+                          f'pearson: {self.get_round_score(results["pearson"]) :.2f}',
+                          f'spearman: {self.get_round_score(results["spearman"]) :.2f}']
         results['prints'] = print_contents
 
         print(f'[{mode}] ' + str(self.datasets[mode]) + f' loss: {running_loss}')
