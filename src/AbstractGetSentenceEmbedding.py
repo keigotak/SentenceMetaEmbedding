@@ -2,6 +2,8 @@ import os
 import pickle
 from decimal import Decimal, ROUND_HALF_UP
 
+import torch
+
 import senteval
 
 
@@ -93,6 +95,17 @@ class AbstractGetSentenceEmbedding:
                 pickle.dump(self.embeddings[model_name], f)
 
         return {'text': texts, 'pearson': results[task]["pearson"], 'spearman': results[task]["spearman"]}
+
+    def modify_batch_sentences_for_senteval(self, batch_words):
+        padded_sequences, padding_masks = {}, {}
+        for model_name in self.model_names:
+            padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items['embeddings'][0][1:-1])
+                                                 for items in [self.model.source[model_name].get_word_embedding(' '.join(words))
+                                                               for words in batch_words]], batch_first=True).to(self.device)
+
+            max_sentence_length = max([len(words) for words in batch_words])
+            padding_masks[model_name] = torch.BoolTensor([[[False] * len(words) + [True] * (max_sentence_length - len(words)) ] for words in batch_words]).squeeze(1).to(self.device)
+        return padded_sequences, padding_masks
 
 
 def prepare(params, samples):

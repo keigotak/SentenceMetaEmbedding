@@ -28,6 +28,7 @@ class AbstractTrainer:
         self.tag = get_now()
         self.cos0 = nn.CosineSimilarity(dim=0)
         self.cos1 = nn.CosineSimilarity(dim=1)
+        self.cos2 = nn.CosineSimilarity(dim=2)
 
     def batch_step(self, batch_embeddings, scores, tokens, with_training=False, with_calc_similality=False):
         raise NotImplementedError
@@ -161,4 +162,21 @@ class AbstractTrainer:
 
     def set_tag(self, tag):
         raise NotImplementedError
+
+    def modify_batch_embeddings_to_easy_to_compute(self, batch_embeddings):
+        padded_sequences = {model_name: [] for model_name in self.model_names}
+        padding_masks = {model_name: [] for model_name in self.model_names}
+        for model_name in self.model_names:
+            for i in range(2):
+                padded_sequences[model_name].append(
+                    torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items[i]).to(self.device)
+                                                     for items in [embs[model_name]
+                                                                   for embs in batch_embeddings]], batch_first=True)
+                )
+
+                max_sentence_length = max([len(items[i]) for items in [embs[model_name] for embs in batch_embeddings]])
+                padding_masks[model_name].append(
+                    torch.BoolTensor([[[False] * len(embs[model_name][i]) + [True] * (max_sentence_length - len(embs[model_name][i])) ] for embs in batch_embeddings]).squeeze(1).to(self.device)
+                )
+        return padded_sequences, padding_masks
 
