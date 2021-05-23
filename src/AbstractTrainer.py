@@ -29,6 +29,7 @@ class AbstractTrainer:
         self.cos0 = nn.CosineSimilarity(dim=0)
         self.cos1 = nn.CosineSimilarity(dim=1)
         self.cos2 = nn.CosineSimilarity(dim=2)
+        self.cose1 = nn.CosineEmbeddingLoss()
 
     def batch_step(self, batch_embeddings, scores, tokens, with_training=False, with_calc_similality=False):
         raise NotImplementedError

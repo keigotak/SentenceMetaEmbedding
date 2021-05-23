@@ -65,3 +65,18 @@ class ValueWatcher:
 
     def is_updated(self):
         return self.is_new
+
+
+if __name__ == '__main__':
+    vw = ValueWatcher()
+    for i in [0., 1.1, 2.1, 3.1, 2.5, 1.9, 3.3, 3.3 ,0.1 ,1.0, 2.9, 2.9, 2.9, 1.9]:
+        vw.update(i)
+        if vw.is_updated():
+            print(f'updated: {vw.max_score}, {vw.count}')
+        else:
+            print(f'not-updated: {i}, {vw.count}')
+
+        if vw.is_over():
+            print('break')
+            break
+
