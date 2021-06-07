@@ -49,8 +49,8 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
         self.attention = Attention(embed_dim=max(self.embedding_dims), num_heads=self.attention_head_num, dropout=self.dropout_ratio).to(self.device)
         self.attention.train()
 
-        self.learning_ratio = 0.2
-        self.gradient_clip = 0.0
+        self.learning_ratio = 0.01
+        self.gradient_clip = 5.0
         self.weight_decay = 1e-4
         self.parameters = self.attention.parameters()
 
@@ -68,7 +68,12 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
         running_loss = 0.0
         if with_training:
+            if not self.attention.training:
+                self.attention.train()
             self.optimizer.zero_grad()
+        else:
+            if self.attention.training:
+                self.attention.eval()
 
         # 入力のbatchを一気に処理できるように変換．
         # batch_size * model_name * similar_sentence * embedding_dim -> model_name * similar_sentence * batch_size * sentence_length * embedding_dim
@@ -86,7 +91,7 @@ class TrainAttentionWithSTSBenchmark(AbstractTrainer):
         # loss = torch.square((1. - self.cos1(sentence_embeddings[0], sentence_embeddings[1])) - (torch.FloatTensor(scores).to(self.device)))
         # loss_cos = torch.square((1. - self.cos1(sentence_embeddings[0], sentence_embeddings[1])))
         if self.loss_mode == 'rscore':
-            loss = torch.square(torch.einsum('bq,bq->b', sentence_embeddings[0], sentence_embeddings[1]) - (torch.FloatTensor(scores).to(self.device)))
+            loss = torch.einsum('bq,bq->b', sentence_embeddings[0], sentence_embeddings[1]) - (torch.FloatTensor(scores).to(self.device))
         elif self.loss_mode == 'cos':
             loss = (1. - self.cos1(sentence_embeddings[0], sentence_embeddings[1]))
         loss = torch.mean(loss)

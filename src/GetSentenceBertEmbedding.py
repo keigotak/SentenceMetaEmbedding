@@ -105,12 +105,12 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         ids = [ids_sent1]
 
         tokens_sent1 = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
-        tokens = [tokens_sent1]
+        tokens = [tokens_sent1[1: -1]]
 
         emb_sent1 = self.model.encode(sentence, output_value='token_embeddings')
         if self.tokenization_mode == 'subword':
             emb_sent1 = self.process_subword(sentence, emb_sent1)
-        embedding = [emb_sent1.squeeze(0).tolist()]
+        embedding = [emb_sent1.squeeze(0).tolist()[1: -1]]
 
         # with self.embeddings_path.open('a') as f:
         #     line = f'SID{self.sentence_id}\t' + '\t'.join([' '.join([str(e) for e in es]) for es in embedding[0]]) + '\n'
@@ -164,10 +164,10 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         for sentence in sentences:
             sentence_embedding = self.get_word_embedding(sentence)['embeddings'][0]
             if self.sentence_pooling_method == 'avg':
-                sentence_embedding = sentence_embedding[1:-1]
+                # sentence_embedding = sentence_embedding[1:-1]
                 sentence_embedding = torch.mean(torch.FloatTensor(sentence_embedding).requires_grad_(False), dim=0).tolist()
             elif self.sentence_pooling_method == 'max':
-                sentence_embedding = sentence_embedding[1:-1]
+                # sentence_embedding = sentence_embedding[1:-1]
                 sentence_embedding, _ = torch.max(torch.FloatTensor(sentence_embedding).requires_grad_(False), dim=0)
                 sentence_embedding = sentence_embedding.tolist()
             sentence_embeddings.append(sentence_embedding)  # get token embeddings

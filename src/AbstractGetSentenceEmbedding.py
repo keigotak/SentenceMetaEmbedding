@@ -78,6 +78,7 @@ class AbstractGetSentenceEmbedding:
             for print_all_content in print_all_contents:
                 text = ' '.join(['{: >40}'] + ['{: >18}'] * (len(print_all_header) - 1)).format(*print_all_content)
                 print(text, file=f)
+                print(text)
                 texts.append(text)
 
             if self.with_detailed_log:

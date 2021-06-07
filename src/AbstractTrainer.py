@@ -30,6 +30,7 @@ class AbstractTrainer:
         self.cos1 = nn.CosineSimilarity(dim=1)
         self.cos2 = nn.CosineSimilarity(dim=2)
         self.cose1 = nn.CosineEmbeddingLoss()
+        self.vw = ValueWatcher()
 
     def batch_step(self, batch_embeddings, scores, tokens, with_training=False, with_calc_similality=False):
         raise NotImplementedError
@@ -74,7 +75,6 @@ class AbstractTrainer:
             pbar.close()
 
     def train(self, num_epoch=100):
-        vw = ValueWatcher()
         for i in range(num_epoch):
             self.train_epoch()
             if self.datasets['train'].batch_mode == 'fixed' and self.datasets['train'].current >= self.datasets['train'].dataset_size:
@@ -83,8 +83,8 @@ class AbstractTrainer:
                 self.datasets['train'].reset(with_shuffle=True)
             rets = self.inference('dev')
 
-            vw.update(rets['pearson'][0])
-            if vw.is_max():
+            self.vw.update(rets['pearson'][0])
+            if self.vw.is_max():
                 trainer.save_model()
 
     def inference(self, mode='dev'):
