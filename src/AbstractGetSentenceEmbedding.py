@@ -28,7 +28,7 @@ class AbstractGetSentenceEmbedding:
             self.single_eval(model_name=model_name)
 
     def get_params(self):
-        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True}
+        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True, 'batch_size': 10000}
 
     def single_eval(self, model_name):
         self.model = self.get_model()
