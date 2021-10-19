@@ -100,9 +100,14 @@ class AbstractGetSentenceEmbedding:
     def modify_batch_sentences_for_senteval(self, batch_words):
         padded_sequences, padding_masks = {}, {}
         for model_name in self.model_names:
-            padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items['embeddings'][0][1:-1])
-                                                 for items in [self.model.source[model_name].get_word_embedding(' '.join(words))
-                                                               for words in batch_words]], batch_first=True).to(self.device)
+            items = []
+            for words in batch_words:
+                item = self.model.source[model_name].get_word_embedding(' '.join(words))
+                items.append(torch.FloatTensor(item['embeddings'][0]))
+            padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
+            # padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items['embeddings'][0][1:-1])
+            #                                      for items in [self.model.source[model_name].get_word_embedding(' '.join(words))
+            #                                                    for words in batch_words]], batch_first=True).to(self.device)
 
             max_sentence_length = max([len(words) for words in batch_words])
             padding_masks[model_name] = torch.BoolTensor([[[False] * len(words) + [True] * (max_sentence_length - len(words)) ] for words in batch_words]).squeeze(1).to(self.device)

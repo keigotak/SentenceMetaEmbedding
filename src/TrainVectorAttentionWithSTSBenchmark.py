@@ -30,6 +30,7 @@ class VectorAttention(nn.Module):
         self.projection_matrices = nn.ModuleDict({model: nn.Linear(self.embedding_dims[model], self.meta_embedding_dim, bias=False) for model in self.model_names})
         self.max_sentence_length = 128
         self.vector_attention = nn.ModuleDict({model: nn.Linear(1, 1, bias=False) for model in self.model_names})
+        # self.vector_attention = nn.ModuleDict({model: nn.Linear(self.max_sentence_length, 1, bias=False) for model in self.model_names})
         self.normalizer = nn.ModuleDict({model: nn.LayerNorm([self.max_sentence_length, self.meta_embedding_dim]) for model in self.model_names})
         self.activation = nn.GELU()
 
@@ -57,7 +58,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.parameters = self.va.parameters()
         self.loss_mode = 'word' # word, cos, rscore
         if self.loss_mode == 'word':
-            self.learning_ratio = 0.005
+            self.learning_ratio = 0.01
         else:
             self.learning_ratio = 0.0001
 
@@ -311,6 +312,7 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
 
     def batcher(self, params, batch):
         sentence_embeddings = []
+        # print(len(batch))
         with torch.no_grad():
             padded_sequences, padding_masks = self.modify_batch_sentences_for_senteval(batch)
             # get attention output
@@ -373,6 +375,7 @@ if __name__ == '__main__':
         print(cls.tag)
 
         dev_rets = cls.model.inference(mode='dev')
+        # rets = cls.single_eval(cls.model_tag[0])
         while not vw.is_over():
             print(f'epoch: {vw.epoch}')
             cls.model.train_epoch()
@@ -402,13 +405,25 @@ if __name__ == '__main__':
         trainer.set_tag(tag)
         cls.set_tag(tag)
         trainer.load_model()
-        rets = trainer.inference(mode='test')
-        print(f'test best scores: ' + ' '.join(rets['prints']))
+        # rets = trainer.inference(mode='test')
+        # print(f'test best scores: ' + ' '.join(rets['prints']))
         cls.model = trainer
         model_tag = cls.model_tag[0]
         if cls.tag != trainer.tag:
             model_tag = f'{model_tag}-{trainer.tag}'
         rets = cls.single_eval(model_tag)
+
+'''
+      vec_attention-10192021082618186513      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              79.94              78.21              76.91              74.90
+                               STS13-all              88.45              87.46              81.24              80.40
+                               STS14-all              91.97              90.68              92.80              91.70
+                               STS15-all              88.47              88.49              86.62              86.52
+                               STS16-all              84.74              84.79              84.43              84.47
+                        STSBenchmark-all              85.41              86.06                  -                  -
+
+
+'''
 
 
 '''
