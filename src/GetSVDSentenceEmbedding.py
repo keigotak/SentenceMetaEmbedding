@@ -52,6 +52,12 @@ if __name__ == '__main__':
 
 
 '''
-
+                                     svd      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.78              79.21              77.63              75.84
+                               STS13-all              90.25              89.25              84.06              83.16
+                               STS14-all              93.14              91.65              94.02              92.73
+                               STS15-all              89.46              89.51              87.68              87.65
+                               STS16-all              85.76              86.19              85.48              85.91
+                        STSBenchmark-all              84.91              85.77                  -                  -
 
 '''

@@ -51,6 +51,12 @@ if __name__ == '__main__':
 
 
 '''
-
+                                    gcca      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.40              79.13              77.23              75.86
+                               STS13-all              90.07              89.09              83.81              83.03
+                               STS14-all              92.87              91.27              93.75              92.36
+                               STS15-all              89.33              89.33              87.55              87.45
+                               STS16-all              85.44              85.84              85.15              85.55
+                        STSBenchmark-all              84.46              85.14                  -                  -
 
 '''

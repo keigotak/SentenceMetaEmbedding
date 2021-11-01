@@ -20,8 +20,11 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         self.tokenizer = self.model.tokenizer
         self.tokenization_mode = 'subword'
         self.subword_pooling_method = 'avg'
-        self.sentence_pooling_method = 'max'
+        self.sentence_pooling_method = 'avg'
         self.embeddings = {self.model_name: {}}
+
+        if model_name == 'gpt2':
+            self.tokenixer
 
         self.tag = get_now()
         self.information_file = f'../results/sberts/info-{self.tag}.txt'
@@ -81,7 +84,14 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
             if len(subword_positions) > 1:
                 subword_embeddings = []
                 for subword_position in subword_positions:
-                    subword_embeddings.append(embeddings[subword_position].requires_grad_(False))
+                    # print(f'{subword_position}, {embeddings.shape[0]}')
+                    if subword_position >= embeddings.shape[0]:
+                        subword_embeddings.append(torch.FloatTensor([0.0] * embeddings[0].shape[0]).requires_grad_(False))
+                    else:
+                        if type(embeddings[subword_positions[0]]) == np.ndarray:
+                            subword_embeddings.append(torch.FloatTensor(embeddings[subword_position]).requires_grad_(False))
+                        else:
+                            subword_embeddings.append(embeddings[subword_position].requires_grad_(False))
                 # subword pooling
                 if self.subword_pooling_method == 'avg':
                     pooled_subword_embedding = torch.mean(torch.stack(subword_embeddings), dim=0)
@@ -90,12 +100,21 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
                 subword_aggregated_embeddings.append(pooled_subword_embedding)
             else:
                 if len(subword_positions) == 0:
-                    subword_aggregated_embeddings.append(torch.zeros_like(embeddings[0]).requires_grad_(False))
+                    if type(embeddings[subword_positions]) == np.ndarray:
+                        subword_aggregated_embeddings.append(torch.zeros_like(torch.FloatTensor(embeddings[0])).requires_grad_(False))
+                    else:
+                        subword_aggregated_embeddings.append(torch.zeros_like(embeddings[0]).requires_grad_(False))
                 else:
-                    subword_aggregated_embeddings.append(embeddings[subword_positions[0]].requires_grad_(False))
+                    if subword_positions[0] >= embeddings.shape[0]:
+                        subword_embeddings.append(torch.FloatTensor([0.0] * embeddings[0].shape[0]).requires_grad_(False))
+                    else:
+                        if type(embeddings[subword_positions[0]]) == np.ndarray:
+                            subword_aggregated_embeddings.append(torch.FloatTensor(embeddings[subword_positions[0]]).requires_grad_(False))
+                        else:
+                            subword_aggregated_embeddings.append(embeddings[subword_positions[0]].requires_grad_(False))
         return torch.stack(subword_aggregated_embeddings, dim=0)
 
-    def get_word_embedding(self, sentence):
+    def get_word_embedding(self, sentence, with_process_subwords=True):
         # if sentence in self.sent_to_id.keys():
         #     embedding = [self.cached_embeddings[self.sent_to_id[sentence]]]
         #     tokens = [sentence.split(' ')]
@@ -108,8 +127,11 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         tokens = [tokens_sent1[1: -1]]
 
         emb_sent1 = self.model.encode(sentence, output_value='token_embeddings')
-        if self.tokenization_mode == 'subword':
-            emb_sent1 = self.process_subword(sentence, emb_sent1)
+        if with_process_subwords:
+            if self.tokenization_mode == 'subword':
+                emb_sent1 = self.process_subword(sentence, emb_sent1)
+        else:
+            emb_sent1 = torch.FloatTensor(emb_sent1)
         embedding = [emb_sent1.squeeze(0).tolist()[1: -1]]
 
         # with self.embeddings_path.open('a') as f:
@@ -238,10 +260,13 @@ if __name__ == '__main__':
             import os
             os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
-        for model_name in ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']:
+        # for model_name in ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']:
+        # for model_name in ['gpt2', 'facebook/bart-base']:
+        for model_name in ['stsb-xlm-r-multilingual']: # ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']:
+        # for model_name in ['stsb-mpnet-base-v2']:
             cls = GetSentenceBertWordEmbedding(model_name=model_name, device=args.device)
             cls.set_tag(get_now())
-            print(model_name)
+            print(f'{model_name}, {cls.sentence_pooling_method}')
             cls.set_model(model_name)
             cls.single_eval(model_name)
             if cls.with_reset_output_file:
@@ -252,6 +277,40 @@ if __name__ == '__main__':
 
 
 '''
+self.sentence_pooling_method = 'avg'
+                      stsb-mpnet-base-v2      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              79.36              77.15              76.13              73.77
+                               STS13-all              90.02              88.83              84.00              83.41
+                               STS14-all              92.35              89.97              92.94              90.70
+                               STS15-all              89.36              89.45              88.14              88.12
+                               STS16-all              85.86              86.92              85.53              86.62
+                        STSBenchmark-all              87.85              88.22                  -                  -
 
+self.sentence_pooling_method = 'max'
+                      stsb-mpnet-base-v2      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              78.07              76.70              75.58              73.93
+                               STS13-all              87.45              86.27              79.03              78.24
+                               STS14-all              90.39              88.63              90.71              89.13
+                               STS15-all              86.02              86.79              83.99              84.72
+                               STS16-all              84.38              85.96              84.12              85.74
+                        STSBenchmark-all              85.72              85.88                  -                  -
+
+self.sentence_pooling_method = 'avg'
+xlm-r-100langs-bert-base-nli-stsb-mean-tokens      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              76.95              74.88              73.92              71.54
+                               STS13-all              85.74              85.21              79.21              78.65
+                               STS14-all              89.44              87.27              90.02              88.08
+                               STS15-all              86.19              86.35              84.17              84.15
+                               STS16-all              80.60              82.20              80.20              81.81
+                        STSBenchmark-all              82.03              82.23                  -                  -
+
+self.sentence_pooling_method = 'max'
+xlm-r-100langs-bert-base-nli-stsb-mean-tokens      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              76.50              75.03              73.91              71.94
+                               STS13-all              84.81              84.57              77.40              77.35
+                               STS14-all              88.43              86.78              88.78              87.42
+                               STS15-all              85.03              85.76              82.86              83.47
+                               STS16-all              79.82              81.43              79.49              81.13
+                        STSBenchmark-all              81.63              81.77                  -                  -
 
 '''

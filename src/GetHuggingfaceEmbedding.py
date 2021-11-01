@@ -102,7 +102,8 @@ class GetHuggingfaceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self, device='cpu'):
         super().__init__()
         self.device = get_device(device)
-        self.model_names = ['bert-large-uncased', 'roberta-large'] # bert-base-uncased, roberta-base, bert-large-uncased, roberta-large
+        # self.model_names = ['bert-large-uncased', 'roberta-large'] # bert-base-uncased, roberta-base, bert-large-uncased, roberta-large
+        self.model_names = ['facebook/bart-large'] # bert-base-uncased, roberta-base, bert-large-uncased, roberta-large, gpt2
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False

@@ -24,9 +24,9 @@ class VectorAttention(nn.Module):
     def __init__(self, model_names):
         super().__init__()
         self.model_names = model_names
-        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024, 'glove': 300}
+        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024, 'glove': 300, 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens': 768, 'stsb-mpnet-base-v2': 768}
         self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
-        self.meta_embedding_dim = 300
+        self.meta_embedding_dim = 512
         self.projection_matrices = nn.ModuleDict({model: nn.Linear(self.embedding_dims[model], self.meta_embedding_dim, bias=False) for model in self.model_names})
         self.max_sentence_length = 128
         self.vector_attention = nn.ModuleDict({model: nn.Linear(1, 1, bias=False) for model in self.model_names})
@@ -37,7 +37,8 @@ class VectorAttention(nn.Module):
 class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
     def __init__(self, device='cpu'):
         self.device = get_device(device)
-        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens'] # , 'glove'
+        # self.model_names = ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']
+        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2'] # , 'glove', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
         self.va = VectorAttention(model_names=self.model_names).to(self.device)
         self.va.train()
 
@@ -72,7 +73,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
     def get_source_embeddings(self):
         sources = {}
         for model in self.model_names:
-            if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']):
+            if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2']):
                 sources[model] = GetSentenceBertWordEmbedding(model, device=self.device)
             elif model == 'glove':
                 sources[model] = GloVeModel()
@@ -135,8 +136,8 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
             # loss の和
             loss = torch.mean(torch.abs(torch.stack(loss)))
         elif self.loss_mode == 'rscore':
-            # loss = torch.norm(sentence_embeddings[0] - sentence_embeddings[1], dim=1) - torch.FloatTensor(scores).to(self.device)
-            loss = torch.einsum('bq,rs->r', sentence_embeddings[0], sentence_embeddings[1]) - (torch.FloatTensor(scores).to(self.device))
+            loss = torch.norm(sentence_embeddings[0] - sentence_embeddings[1], dim=1) - torch.FloatTensor(scores).to(self.device)
+            # loss = torch.einsum('bq,rs->r', sentence_embeddings[0], sentence_embeddings[1]) - (torch.FloatTensor(scores).to(self.device))
             loss = torch.mean(loss)
 
         if with_calc_similality:
@@ -234,6 +235,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         else:
             self.va = torch.load(self.get_save_path('va'))
             self.va.to(self.device)
+            print('\n'.join([f'{k}: {float(v.weight)}' for k, v in self.va.vector_attention.items()]))
 
         # if self.with_vector_attention:
         #     if not os.path.exists(self.get_save_path('vector')):
@@ -294,7 +296,8 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
         super().__init__()
         self.device = get_device(device)
         self.tag = get_now()
-        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens']
+        # self.model_names = ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']
+        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2'] # , 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
@@ -359,7 +362,7 @@ if __name__ == '__main__':
         import os
         os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
-    with_senteval = True
+    with_senteval = False
 
     if with_senteval:
         dp = DataPooler()
@@ -391,6 +394,7 @@ if __name__ == '__main__':
                 dp.set('best-score', vw.max_score)
             dp.set(f'scores', rets)
         print(f'dev best scores: {cls.model.get_round_score(dp.get("best-score")[-1]) :.2f}')
+        print(cls.model.information_file)
 
         cls.model.load_model()
         rets = cls.model.inference(mode='test')
@@ -398,10 +402,11 @@ if __name__ == '__main__':
         rets = cls.single_eval(cls.model_tag[0])
         cls.model.append_information_file([f'es_metrics: {es_metrics}'])
         cls.model.append_information_file(rets['text'])
+        print(cls.model.information_file)
     else:
         cls = EvaluateVectorAttentionModel(device=args.device)
         trainer = TrainVectorAttentionWithSTSBenchmark(args.device)
-        tag = '03062021183728375245'
+        tag = '10302021131616868619' # '10272021232254714917' # '10252021190301856515' # 10222021201617472745, , 10192021082737054376
         trainer.set_tag(tag)
         cls.set_tag(tag)
         trainer.load_model()
@@ -414,6 +419,102 @@ if __name__ == '__main__':
         rets = cls.single_eval(model_tag)
 
 '''
+        self.meta_embedding_dim = 768
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'word' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+roberta-large-nli-stsb-mean-tokens: -0.016756288707256317
+bert-large-nli-stsb-mean-tokens: 0.010068194009363651
+vec_attention-10302021084430699531-10272021232254714917      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              79.92              77.93              76.82              74.54
+                               STS13-all              88.88              87.90              81.91              81.32
+                               STS14-all              92.05              90.60              92.87              91.60
+                               STS15-all              88.63              88.78              86.92              87.01
+                               STS16-all              85.21              85.26              84.91              84.96
+                        STSBenchmark-all              85.53              86.12                  -                  -
+----
+10252021190207303220
+STSBenchmark-dev pearson: 85.53 spearman: 83.80
+dev best scores: 85.53
+STSBenchmark-test pearson: 85.02 spearman: 83.84
+test best scores: STSBenchmark-test pearson: 85.02 spearman: 83.84
+
+roberta-large-nli-stsb-mean-tokens: -0.021116899326443672
+bert-large-nli-stsb-mean-tokens: 0.012464968487620354
+
+-----
+        self.meta_embedding_dim = 512
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'word' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+
+      vec_attention-10232021131936664580      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              79.73              77.78              76.74              74.56
+                               STS13-all              88.16              87.18              80.56              79.58
+                               STS14-all              91.96              90.57              92.76              91.52
+                               STS15-all              88.12              88.26              86.24              86.32
+                               STS16-all              84.85              85.02              84.54              84.72
+                        STSBenchmark-all              85.78              86.52                  -                  -
+../results/vec_attention/info-10232021132007465076.txt
+
+
+
+
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = False
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'rscore' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+      vec_attention-10222021033234396076      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.44              78.35              77.74              75.23
+                               STS13-all              88.70              87.74              81.38              80.62
+                               STS14-all              91.59              90.48              92.39              91.47
+                               STS15-all              87.82              87.97              85.93              86.05
+                               STS16-all              84.76              85.16              84.50              84.90
+                        STSBenchmark-all              84.07              84.52                  -                  -
+
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'word' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+
       vec_attention-10192021082618186513      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
                                STS12-all              79.94              78.21              76.91              74.90
                                STS13-all              88.45              87.46              81.24              80.40
@@ -422,7 +523,131 @@ if __name__ == '__main__':
                                STS16-all              84.74              84.79              84.43              84.47
                         STSBenchmark-all              85.41              86.06                  -                  -
 
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
 
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'rscore' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+
+        super().__init__()
+
+        self.batch_size = 128
+        self.datasets['train'].batch_size = self.batch_size
+        self.information_file = f'../results/vec_attention/info-{self.tag}.txt'
+        self.vw.threshold = 5
+
+      vec_attention-10192021234059393271      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.74              78.72              78.11              75.63
+                               STS13-all              89.22              88.46              82.49              82.07
+                               STS14-all              91.80              90.71              92.61              91.78
+                               STS15-all              88.16              88.25              86.30              86.37
+                               STS16-all              84.28              84.64              84.05              84.40
+                        STSBenchmark-all              84.56              85.05                  -                  -
+
+        self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
+        self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'avg' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'rscore' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+      vec_attention-10202021075207625266      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.98              79.22              78.09              75.87
+                               STS13-all              89.88              88.91              83.39              82.60
+                               STS14-all              92.58              91.28              93.54              92.45
+                               STS15-all              88.66              88.75              86.82              86.77
+                               STS16-all              84.95              85.60              84.68              85.35
+                        STSBenchmark-all              83.05              83.64                  -                  -
+
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'avg' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'word' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+      vec_attention-10212021181735132000      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              79.70              78.22              76.34              74.78
+                               STS13-all              89.44              88.55              82.82              82.13
+                               STS14-all              92.44              91.05              93.32              92.11
+                               STS15-all              88.59              88.61              86.72              86.63
+                               STS16-all              85.29              85.70              84.96              85.38
+                        STSBenchmark-all              53.03              47.41                  -                  -
+
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = False
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'word' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+
+        super().__init__()
+
+        self.batch_size = 128
+        self.datasets['train'].batch_size = self.batch_size
+        self.information_file = f'../results/vec_attention/info-{self.tag}.txt'
+        self.vw.threshold = 5
+
+      vec_attention-10222021001112920607      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.53              78.53              77.81              75.43
+                               STS13-all              88.70              87.58              80.86              79.87
+                               STS14-all              91.97              90.78              92.76              91.72
+                               STS15-all              88.68              88.77              87.07              87.11
+                               STS16-all              85.80              85.62              85.51              85.33
+                        STSBenchmark-all              84.54              84.88                  -                  -
+
+
+
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
+
+        self.gradient_clip = 0.0
+        self.weight_decay = 1e-4
+        self.with_vector_attention = True
+        self.with_projection_matrix = True
+        self.parameters = self.va.parameters()
+        self.loss_mode = 'word' # word, cos, rscore
+        if self.loss_mode == 'word':
+            self.learning_ratio = 0.01
+        else:
+            self.learning_ratio = 0.0001
+
+      vec_attention-10222021201440521085      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              79.31              77.44              76.24              74.06
+                               STS13-all              87.66              86.82              79.49              78.86
+                               STS14-all              91.51              90.30              92.32              91.30
+                               STS15-all              87.67              87.82              85.72              85.78
+                               STS16-all              85.04              85.22              84.76              84.94
+                        STSBenchmark-all              85.45              86.01                  -                  -
 '''
 
 

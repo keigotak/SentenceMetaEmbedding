@@ -28,7 +28,8 @@ class AbstractGetSentenceEmbedding:
             self.single_eval(model_name=model_name)
 
     def get_params(self):
-        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True, 'batch_size': 10000}
+        # return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True, 'batch_size': 10000}
+        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'batch_size': 10000}
 
     def single_eval(self, model_name):
         self.model = self.get_model()
@@ -37,6 +38,7 @@ class AbstractGetSentenceEmbedding:
 
         se = senteval.engine.SE(params, self.batcher)
         transfer_tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16', 'STSBenchmark']
+        # transfer_tasks = ['STSBenchmark']
         results = se.eval(transfer_tasks)
 
         print_header = [model_name, 'pearson-r', 'peason-p_val', 'spearman-r', 'spearman-p_val', 'n_samples']
@@ -101,9 +103,13 @@ class AbstractGetSentenceEmbedding:
         padded_sequences, padding_masks = {}, {}
         for model_name in self.model_names:
             items = []
-            for words in batch_words:
-                item = self.model.source[model_name].get_word_embedding(' '.join(words))
-                items.append(torch.FloatTensor(item['embeddings'][0]))
+            if model_name == 'glove':
+                items = self.model.source[model_name].get_word_embedding(batch_words)
+                items = [torch.FloatTensor(item) for item in items]
+            else:
+                for words in batch_words:
+                    item = self.model.source[model_name].get_word_embedding(' '.join(words))
+                    items.append(torch.FloatTensor(item['embeddings'][0]))
             padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
             # padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items['embeddings'][0][1:-1])
             #                                      for items in [self.model.source[model_name].get_word_embedding(' '.join(words))
