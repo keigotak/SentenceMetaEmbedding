@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+import sys
 
 import numpy as np
 import torch
@@ -10,7 +11,6 @@ import torch.nn as nn
 from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
 
-from STSDataset import STSDataset
 from GetSentenceBertEmbedding import GetSentenceBertWordEmbedding
 from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
 from GetGloVeEmbedding import GloVeModel
@@ -23,8 +23,9 @@ from HelperFunctions import set_seed, get_now, get_device
 class VectorAttention(nn.Module):
     def __init__(self, model_names):
         super().__init__()
+        set_seed(0)
         self.model_names = model_names
-        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024, 'glove': 300, 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens': 768, 'stsb-mpnet-base-v2': 768}
+        self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024, 'glove': 300, 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens': 768, 'stsb-mpnet-base-v2': 768, 'sentence-transformers/stsb-bert-large': 1024, 'sentence-transformers/stsb-roberta-large': 1024, 'sentence-transformers/stsb-distilbert-base': 768, 'stsb-bert-large': 1024, 'stsb-roberta-large': 1024, 'stsb-distilbert-base': 768}
         self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
         self.meta_embedding_dim = 512
         self.projection_matrices = nn.ModuleDict({model: nn.Linear(self.embedding_dims[model], self.meta_embedding_dim, bias=False) for model in self.model_names})
@@ -35,10 +36,14 @@ class VectorAttention(nn.Module):
         self.activation = nn.GELU()
 
 class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
-    def __init__(self, device='cpu'):
+    def __init__(self, device='cpu', model_names=None):
         self.device = get_device(device)
-        # self.model_names = ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']
-        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2'] # , 'glove', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+        # self.model_names = ['stsb-mpnet-base-v2']
+        if model_names is not None:
+            self.model_names = model_names
+        else:
+            self.model_names = ['stsb-roberta-large', 'stsb-bert-large', 'stsb-distilbert-base'] # ['stsb-mpnet-base-v2', 'bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens'] # , 'glove', 'sentence-transformers/xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+        # self.model_names = ['stsb-roberta-large', 'stsb-mpnet-base-v2', 'stsb-bert-large', 'stsb-distilbert-base']
         self.va = VectorAttention(model_names=self.model_names).to(self.device)
         self.va.train()
 
@@ -56,12 +61,31 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.weight_decay = 1e-4
         self.with_vector_attention = True
         self.with_projection_matrix = True
-        self.parameters = self.va.parameters()
+        self.with_train_coefficients = True
+        self.with_train_model = False
         self.loss_mode = 'word' # word, cos, rscore
-        if self.loss_mode == 'word':
-            self.learning_ratio = 0.01
+
+        if self.with_train_coefficients:
+            self.alpha = nn.Linear(1, 1, bias=False).to(self.device)
+            self.lam = nn.Linear(1, 1, bias=False).to(self.device)
+            self.beta = nn.Linear(1, 1, bias=False).to(self.device)
+            nn.init.constant_(self.lam.weight, 0.01)
+            nn.init.constant_(self.beta.weight, 0.01)
+            self.parameters = list(self.va.parameters()) + list(self.lam.parameters()) + list(self.beta.parameters())
         else:
-            self.learning_ratio = 0.0001
+            self.alpha = 0.01
+            self.lam = 0.01
+            self.beta = 0.01
+            self.parameters = list(self.va.parameters())
+
+        if self.with_train_model:
+            for model_name in model_names:
+                self.parameters += list(self.source[model_name].model.parameters())
+
+        if self.loss_mode == 'word':
+            self.learning_ratio = 1e-2
+        else:
+            self.learning_ratio = 1e-2
 
         super().__init__()
 
@@ -73,12 +97,13 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
     def get_source_embeddings(self):
         sources = {}
         for model in self.model_names:
-            if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2']):
+            if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2', 'stsb-roberta-large', 'stsb-mpnet-base-v2', 'stsb-bert-large', 'stsb-distilbert-base']):
                 sources[model] = GetSentenceBertWordEmbedding(model, device=self.device)
+                # sources[model].train()
             elif model == 'glove':
                 sources[model] = GloVeModel()
             else:
-                source[model] = GetHuggingfaceWordEmbedding(model, device=self.device)
+                sources[model] = GetHuggingfaceWordEmbedding(model, device=self.device)
         return sources
 
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
@@ -127,14 +152,31 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
                                     loss.append(torch.norm(words1[:, i] - words2[:, j], dim=1))
                                 else: # 同じ文の違う単語を比較　違う単語は遠くに
                                     # loss.append((1. + self.cos1(words1[:, i], words2[:, j])))
-                                    loss.append(-torch.norm(words1[:, i] - words2[:, j], dim=1))
+                                    if self.with_train_coefficients:
+                                        loss.append((-self.alpha.weight * torch.norm(words1[:, i] - words2[:, j], dim=1)).squeeze(0))
+                                    else:
+                                        loss.append(-self.alpha * torch.norm(words1[:, i] - words2[:, j], dim=1))
 
                         # 違う文の比較　
                         # loss.append((1. + self.cos1(sentence_embeddings[0], sentence_embeddings[1])))
-                        loss.append(-torch.norm(sentence_embeddings[0] - sentence_embeddings[1], dim=1))
+                        if self.with_train_coefficients:
+                            loss.append((-self.beta.weight * (torch.norm(sentence_embeddings[0] - sentence_embeddings[1], dim=1))).squeeze(0))
+                        else:
+                            loss.append(-self.beta * torch.norm(sentence_embeddings[0] - sentence_embeddings[1], dim=1))
+
+            if self.with_train_coefficients:
+                embedding_loss = [(self.lam.weight * torch.norm(self.va.projection_matrices[model_name].weight.T @ self.va.projection_matrices[model_name].weight - torch.eye(self.va.embedding_dims[model_name]).to(self.device))).squeeze(0) for model_name in self.model_names]
+            else:
+                embedding_loss = [self.lam * torch.norm((self.va.projection_matrices[model_name].weight.T @ self.va.projection_matrices[model_name].weight) - torch.eye(self.va.embedding_dims[model_name], device=self.device)) for model_name in self.model_names]
 
             # loss の和
-            loss = torch.mean(torch.abs(torch.stack(loss)))
+            # if float(self.lam.weight) == 0.0:
+            if self.lam == 0.0:
+                loss = torch.mean(torch.abs(torch.stack(loss)))
+            else:
+                # loss = torch.mean(torch.abs(torch.stack(loss))) + torch.mean(torch.stack(embedding_loss))
+                loss = torch.mean(torch.stack(loss)) + torch.mean(torch.stack(embedding_loss))
+
         elif self.loss_mode == 'rscore':
             loss = torch.norm(sentence_embeddings[0] - sentence_embeddings[1], dim=1) - torch.FloatTensor(scores).to(self.device)
             # loss = torch.einsum('bq,rs->r', sentence_embeddings[0], sentence_embeddings[1]) - (torch.FloatTensor(scores).to(self.device))
@@ -154,7 +196,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
                 nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
         return gs_scores, sys_scores, running_loss
 
@@ -183,7 +225,6 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
 
             # pad_embeddings = {model_name: self.va.normalizer[model_name](pad_embeddings[model_name]) for model_name in
             #            self.model_names}
-
             word_embeddings = {
                 model_name: pad_embeddings[model_name] * self.va.vector_attention[model_name].weight.squeeze(0)
                 for model_name in self.model_names}
@@ -209,7 +250,10 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         if self.source_pooling_method == 'avg':
             pooled_word_embeddings = torch.mean(torch.stack([word_embeddings[model_name] for model_name in self.model_names]), dim=0)
         elif self.source_pooling_method == 'concat':
-            pooled_word_embeddings = torch.cat([word_embeddings[model_name] for model_name in self.model_names], dim=2)
+            try:
+                pooled_word_embeddings = torch.cat([word_embeddings[model_name] for model_name in self.model_names], dim=2)
+            except:
+                print("shape error")
 
         # aggregate word embeddings to sentence embedding
         if self.sentence_pooling_method == 'avg':
@@ -236,6 +280,9 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
             self.va = torch.load(self.get_save_path('va'))
             self.va.to(self.device)
             print('\n'.join([f'{k}: {float(v.weight)}' for k, v in self.va.vector_attention.items()]))
+            # print('\n'.join([f'{k}: {float(v.weight)}' for k, v in self.va.projection_matrices.items()]))
+            # self.va.projection_matrices = nn.ModuleDict({model: nn.Linear(self.embedding_dims[model], self.meta_embedding_dim, bias=False) for model in self.model_names})
+
 
         # if self.with_vector_attention:
         #     if not os.path.exists(self.get_save_path('vector')):
@@ -254,6 +301,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
 
         with Path(self.information_file).open('w') as f:
             f.write(f'source: {",".join(self.model_names)}\n')
+            f.write(f'meta_embedding_dim: {self.va.meta_embedding_dim}\n')
             f.write(f'tokenization_mode: {self.tokenization_mode}\n')
             f.write(f'subword_pooling_method: {self.subword_pooling_method}\n')
             f.write(f'source_pooling_method: {self.source_pooling_method}\n')
@@ -261,10 +309,27 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
             f.write(f'learning_ratio: {self.learning_ratio}\n')
             f.write(f'gradient_clip: {self.gradient_clip}\n')
             f.write(f'weight_decay: {self.weight_decay}\n')
+            if self.with_train_coefficients:
+                f.write(f'alpha: {self.alpha.weight}\n')
+                f.write(f'lambda: {self.lam.weight}\n')
+                f.write(f'beta: {self.beta.weight}\n')
+            else:
+                f.write(f'alpha: {self.alpha}\n')
+                f.write(f'lambda: {self.lam}\n')
+                f.write(f'beta: {self.beta}\n')
             f.write(f'batch_size: {self.batch_size}\n')
             f.write(f'with_vector_attention: {self.with_vector_attention}\n')
             f.write(f'with_projection_matrix: {self.with_projection_matrix}\n')
+            f.write(f'with_train_coefficients: {self.with_train_coefficients}\n')
+            f.write(f'with_train_model: {self.with_train_model}\n')
+            f.write(f'dataset_type: {self.dataset_type}\n')
             f.write(f'loss_mode: {self.loss_mode}\n')
+            f.write(f'weights: \n')
+            f.write('\n'.join([f'{k}: {float(v.weight)}' for k, v in self.va.vector_attention.items()]))
+            f.write('\n')
+            f.write(str(self.optimizer))
+            f.write('\n')
+
 
     def set_tag(self, tag):
         self.tag = tag
@@ -296,13 +361,15 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
         super().__init__()
         self.device = get_device(device)
         self.tag = get_now()
-        # self.model_names = ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']
-        self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2'] # , 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+        # self.model_names = ['stsb-mpnet-base-v2']
+        # self.model_names = ['roberta-large-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2', 'bert-large-nli-stsb-mean-tokens'] # 'roberta-large-nli-stsb-mean-tokens', , 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+        self.model_names = ['stsb-roberta-large', 'stsb-bert-large', 'stsb-distilbert-base'] # , 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+        # self.model_names = ['sentence-transformers/stsb-roberta-large', 'sentence-transformers/stsb-bert-large', 'sentence-transformers/stsb-distilbert-base'] # , 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.model = TrainVectorAttentionWithSTSBenchmark(device=device)
-        self.model.model_names = self.model_names
+        self.model = TrainVectorAttentionWithSTSBenchmark(device=device, model_names=self.model_names)
         self.model_tag = [f'vec_attention-{self.tag}']
         self.output_file_name = 'vec_attention.txt'
         self.model.va.eval()
@@ -339,6 +406,7 @@ class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
               'learning_ratio': self.model.learning_ratio,
               'gradient_clip': self.model.gradient_clip,
               'weight_decay': self.model.weight_decay,
+              'lambda': self.model.lam,
               'batch_size': self.model.batch_size,
               'with_vector_attention': self.model.with_vector_attention,
               'loss_mode': self.model.loss_mode,
@@ -362,7 +430,7 @@ if __name__ == '__main__':
         import os
         os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
-    with_senteval = False
+    with_senteval = True
 
     if with_senteval:
         dp = DataPooler()
@@ -373,8 +441,8 @@ if __name__ == '__main__':
             vw = ValueWatcher()
         cls = EvaluateVectorAttentionModel(device=args.device)
         trainer = cls.model # TrainVectorAttentionWithSTSBenchmark(args.device)
-        # trainer.model_names = cls.model_names
-        # trainer.set_tag(cls.tag)
+        trainer.model_names = cls.model_names
+        trainer.set_tag(cls.tag)
         print(cls.tag)
 
         dev_rets = cls.model.inference(mode='dev')
@@ -406,7 +474,7 @@ if __name__ == '__main__':
     else:
         cls = EvaluateVectorAttentionModel(device=args.device)
         trainer = TrainVectorAttentionWithSTSBenchmark(args.device)
-        tag = '10302021131616868619' # '10272021232254714917' # '10252021190301856515' # 10222021201617472745, , 10192021082737054376
+        tag = '12052021102319620233' # '11222021182523445587' # '10302021131616868619' # '10272021232254714917' # '10252021190301856515' # 10222021201617472745, , 10192021082737054376
         trainer.set_tag(tag)
         cls.set_tag(tag)
         trainer.load_model()
@@ -419,6 +487,28 @@ if __name__ == '__main__':
         rets = cls.single_eval(model_tag)
 
 '''
+../results/vec_attention/info-12022021075615227597.txt
+stsb-roberta-large: 0.25510174036026
+stsb-bert-large: -0.11384961754083633
+stsb-distilbert-base: 0.2495175451040268
+      vec_attention-12022021075615227597      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.35              78.01              77.53              74.68
+                               STS13-all              88.86              88.08              81.89              81.46
+                               STS14-all              91.94              90.64              92.69              91.61
+                               STS15-all              88.00              88.31              86.04              86.35
+                               STS16-all              84.54              84.95              84.25              84.65
+                        STSBenchmark-all              84.95              85.60                  -                  -
+
+
+
+vec_attention-11142021130216240370-10302021105515772693      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.41              78.45              77.57              75.34
+                               STS13-all              89.70              88.57              82.91              82.12
+                               STS14-all              92.47              90.80              93.00              91.48
+                               STS15-all              88.91              89.22              87.35              87.62
+                               STS16-all              86.44              87.03              86.15              86.76
+                        STSBenchmark-all              86.44              87.20                  -                  -
+
         self.meta_embedding_dim = 768
         self.source_pooling_method = 'concat' # avg, concat
         self.sentence_pooling_method = 'max' # avg, max

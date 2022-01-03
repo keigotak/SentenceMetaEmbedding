@@ -38,6 +38,7 @@ class AbstractGetSentenceEmbedding:
 
         se = senteval.engine.SE(params, self.batcher)
         transfer_tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16', 'STSBenchmark']
+        # transfer_tasks = ['STS12']
         # transfer_tasks = ['STSBenchmark']
         results = se.eval(transfer_tasks)
 
@@ -101,6 +102,23 @@ class AbstractGetSentenceEmbedding:
 
     def modify_batch_sentences_for_senteval(self, batch_words):
         padded_sequences, padding_masks = {}, {}
+        # for words in batch_words:
+        #     items = []
+        #     # words = ['for', 'the', 'third', 'time', 'in', 'four', 'years', 'wildfires', 'closed', 'mesa', 'verde', 'national', 'park', ',', 'the', 'country', '’', 's', 'only', 'park', 'dedicated', 'to', 'ancient', 'ruins', '.']
+        #     # words = ['"', 'i', '´', 'm', 'very', 'proud', 'of', 'the', 'citizens', 'of', 'this', 'state', ',', '"', 'gov.', 'john', 'baldacci', 'said', 'after', 'votes', 'from', 'tuesday', '´', 's', 'referendum', 'were', 'counted', '.']
+        #     # words = ['on', 'saturday', ',', 'a', '149mph', 'serve', 'against', 'agassi', 'equalled', 'rusedski', "'s", 'world', 'record', '.']
+        #     # words = ['the', 'settlement', 'includes', '$', '4.1', 'million', 'in', 'attorneys', "'", 'fees', 'and', 'expenses', '.']
+        #     # words = ['the', 'president', 'has', 'less', 'of', 'capacities', 'than', 'it', 'does', 'not', 'appear', 'to', 'with', 'it', ',', 'and', 'it', 'particuli', '�', 'rement', 'is', 'particuli', '�', 'rement', 'eclipsed', 'by', 'the', 'guide', 'supr', '�', 'me', 'the', 'ayatollah', 'ali', 'khamenei', '.']
+        #     # words = ['the', 'old', 'version', 'of', 'the', 'european', 'reaction', '(', 'what', 'the', 'psychologists', 'call', '“', 'the', 'desire', 'of', 'the', 'dollar', '”', ')', 'will', 'become', 'only', 'more', 'penetrating', '.']
+        #     words = ['there', 'is', 'a', 'certain', 'physical', 'distance', 'within', 'which', 'some', 'other', 'entity', 'can', 'participate', 'in', 'an', 'event', '(', 'typically', 'perception', 'or', 'manipulation', ')', 'with', 'the', 'participant.', 'alternatively', ',', 'the', 'event', 'may', 'be', 'indicated', 'metonymically', 'by', 'a', 'instrument', '.', '[', 'note', 'the', 'connection', 'with', '*', 'distance', ',', 'sufficiency', ',', 'and', 'capability.', 'words', 'in', 'this', 'frame', 'can', 'generally', 'be', 'paraphrased', '"', 'close', 'enough', 'to', 'be', 'able', 'to', '"', '.', ']']
+        #
+        #     words = [w for w in words if w != '�']
+        #     for model_name in self.model_names:
+        #         item = self.model.source[model_name].get_word_embedding(' '.join(words))
+        #         items.append(item['embeddings'][0])
+        #         assert len(item['ids']) == len(item['embeddings'][0])
+        #     print(f'{len(items[0])}, {len(items[1])}, {len(items[2])}')
+
         for model_name in self.model_names:
             items = []
             if model_name == 'glove':
@@ -108,6 +126,8 @@ class AbstractGetSentenceEmbedding:
                 items = [torch.FloatTensor(item) for item in items]
             else:
                 for words in batch_words:
+                    words = [w for w in words if w != '�']
+                    # print(words)
                     item = self.model.source[model_name].get_word_embedding(' '.join(words))
                     items.append(torch.FloatTensor(item['embeddings'][0]))
             padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
@@ -117,6 +137,9 @@ class AbstractGetSentenceEmbedding:
 
             max_sentence_length = max([len(words) for words in batch_words])
             padding_masks[model_name] = torch.BoolTensor([[[False] * len(words) + [True] * (max_sentence_length - len(words)) ] for words in batch_words]).squeeze(1).to(self.device)
+
+        max_sentence_length = [padded_sequences[k].shape[1] for k in padded_sequences.keys()]
+        padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
         return padded_sequences, padding_masks
 
 

@@ -4,14 +4,14 @@ from AbstractGetSentenceEmbedding import *
 
 class GetSVDSentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
-        os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
         super().__init__()
         self.model_names = ['svd']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.output_file_name = 'svd.txt'
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.tag = '04072021215506466248'
+        self.tag = '12202021230408819021' # '04072021215506466248'
 
         self.indexer = None
 
@@ -26,7 +26,6 @@ class GetSVDSentenceEmbedding(AbstractGetSentenceEmbedding):
                 self.model = pickle.load(f)
             with open(f'../models/svd_{self.tag}_sentence_indexer.pkl', 'rb') as f:
                 self.indexer = pickle.load(f)
-
         return self.model
 
     def batcher(self, params, batch):

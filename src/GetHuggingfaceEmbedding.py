@@ -57,20 +57,12 @@ class GetHuggingfaceWordEmbedding:
         return torch.stack(subword_aggregated_embeddings, dim=0)
 
     def get_word_embeddings(self, sent1, sent2):
-        ids_sent1 = self.get_ids(sent1)
-        ids_sent2 = self.get_ids(sent2)
-        ids = [ids_sent1, ids_sent2]
-
-        tokens_sent1 = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
-        tokens_sent2 = self.tokenizer.convert_ids_to_tokens(ids_sent2.data['input_ids'][0])
-        tokens = [tokens_sent1, tokens_sent2]
-
-        emb_sent1, last_hidden1 = self.model(**ids_sent1)
-        emb_sent2, last_hidden2 = self.model(**ids_sent2)
-        if self.tokenization_mode == 'subword':
-            emb_sent1 = self.process_subword(sent1, emb_sent1.squeeze(0))
-            emb_sent2 = self.process_subword(sent2, emb_sent2.squeeze(0))
-        embedding = [emb_sent1.squeeze(0).tolist(), emb_sent2.squeeze(0).tolist()]
+        ids, tokens, embedding = [], [], []
+        for sent in [sent1, sent2]:
+            rets = self.get_word_embedding(sent)
+            ids.extend(rets['ids'])
+            tokens.extend(rets['tokens'])
+            embedding.extend(rets['embeddings'])
 
         return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
 
@@ -87,7 +79,7 @@ class GetHuggingfaceWordEmbedding:
         tokens_sent1 = self.tokenizer.convert_ids_to_tokens(ids_sent1.data['input_ids'][0])
         tokens = [tokens_sent1]
 
-        emb_sent1, last_hidden1 = self.model(**ids_sent1)
+        emb_sent1 = self.model(**ids_sent1)
         if self.tokenization_mode == 'subword':
             emb_sent1 = self.process_subword(sentence, emb_sent1.squeeze(0))
         embedding = [emb_sent1.squeeze(0).tolist()]

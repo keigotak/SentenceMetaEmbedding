@@ -9,7 +9,10 @@ class GetMetaSentenceEmbedding(AbstractGetSentenceEmbedding):
         os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()
         self.model_names = ['avg', 'concat']
-        self.src_model_names = ['bert-large-nli-stsb-mean-tokens', 'use']
+        # self.src_model_names = ['bert-large-nli-stsb-mean-tokens', 'use']
+        # self.src_model_names = ['stsb-mpnet-base-v2', 'bert-large-nli-stsb-mean-tokens',
+        #                     'roberta-large-nli-stsb-mean-tokens']
+        self.src_model_names = ['stsb-roberta-large', 'stsb-bert-large', 'stsb-distilbert-base']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.model = {}
         self.with_save_embeddings = True
@@ -43,11 +46,12 @@ class GetMetaSentenceEmbedding(AbstractGetSentenceEmbedding):
                 self.embeddings[model_name][sentence] = np.array(sentence_embeddings).mean(axis=0)
                 multiple_sentence_embeddings.append(np.array(sentence_embeddings).mean(axis=0).tolist())
             elif self.model_name == 'concat':
-                for i, sentence_embedding in zip(range(len(sentence_embeddings)), sentence_embeddings):
-                    if i == 0:
-                        concat_embedding = sentence_embedding
-                    else:
-                        concat_embedding += sentence_embedding
+                concat_embedding = sum(sentence_embeddings, [])
+                # for i, sentence_embedding in zip(range(len(sentence_embeddings)), sentence_embeddings):
+                #     if i == 0:
+                #         concat_embedding = sentence_embedding
+                #     else:
+                #         concat_embedding += sentence_embedding
                 self.embeddings[model_name][sentence] = np.array(concat_embedding)
                 multiple_sentence_embeddings.append(concat_embedding)
 
@@ -64,6 +68,20 @@ if __name__ == '__main__':
 
 
 '''
+                                     avg      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              80.96              79.01              77.88              75.53
+                               STS13-all              90.33              89.33              84.21              83.39
+                               STS14-all              93.10              91.66              93.99              92.76
+                               STS15-all              89.12              89.16              87.45              87.39
+                               STS16-all              85.71              86.20              85.41              85.90
+                        STSBenchmark-all              85.46              85.88                  -                  -
+                                  concat      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
+                               STS12-all              81.01              79.15              77.84              75.67
+                               STS13-all              90.52              89.51              84.48              83.60
+                               STS14-all              93.23              91.76              94.11              92.85
+                               STS15-all              89.44              89.45              87.71              87.62
+                               STS16-all              86.04              86.46              85.74              86.17
+                        STSBenchmark-all              85.49              85.84                  -                  -
 
 
 '''

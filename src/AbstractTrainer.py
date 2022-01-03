@@ -10,7 +10,7 @@ import torch.nn as nn
 from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
 
-from STSDataset import STSDataset
+from STSDataset import MergedSTSDataset, STSDataset
 from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
 from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstractGetSentenceEmbedding import *
@@ -22,8 +22,13 @@ from HelperFunctions import set_seed, get_now
 class AbstractTrainer:
     def __init__(self):
         set_seed(0)
-        self.datasets = {mode: STSDataset(mode=mode) for mode in ['train', 'dev', 'test']}
+        self.dataset_type = 'normal'
+        if self.dataset_type == 'merged':
+            self.datasets = {mode: MergedSTSDataset(mode=mode) for mode in ['train', 'dev', 'test']}
+        else:
+            self.datasets = {mode: STSDataset(mode=mode) for mode in ['train', 'dev', 'test']}
         self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
+        # self.optimizer = torch.optim.AdamW(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
         self.tag = get_now()
         self.cos0 = nn.CosineSimilarity(dim=0)
@@ -90,11 +95,11 @@ class AbstractTrainer:
     def inference(self, mode='dev'):
         running_loss = 0.0
         results = {}
-        pearsonrs, spearmanrs = [], []
+        pearson_rs, spearman_rhos = [], []
 
         # batch loop
+        sys_scores, gs_scores = [], []
         while not self.datasets[mode].is_batch_end():
-            sys_scores, gs_scores = [], []
             sentences1, sentences2, scores = self.datasets[mode].get_batch()
 
             # get vector representation for each embedding
@@ -102,6 +107,10 @@ class AbstractTrainer:
             batch_tokens = []
             with torch.no_grad():
                 for sent1, sent2 in zip(sentences1, sentences2):
+                    # sent1 = 'the president has fewer powers than it seems , overshadowed particularly by supreme guide ayatollah ali khamenei .'
+                    # sent2 = 'the president has less of capacities than it does not appear to with it , and it particuli � rement is particuli � rement eclipsed by the guide supr � me the ayatollah ali khamenei .'
+                    # sent1 = 'the english word " right " comes from proto-indo-european word o ̯ reĝtos which meant " correct " and had cognates o ̯ reĝr " directive , order " , o ̯ reĝs " king , ruler " , o ̯ reĝti " guides , directs " , o ̯ reĝi ̯ om " kingdom " .'
+                    # sent1 = 'the english word " right " comes from proto-indo-european word o ̯ reĝtos which meant " correct " and had cognates o ̯ reĝr " directive , order " , o ̯ reĝs " king , ruler " , o ̯ reĝti " guides , directs " , o ̯ reĝi ̯ om " kingdom " .'
                     embeddings = {}
                     for model_name in self.model_names:
                         rets = self.source[model_name].get_word_embeddings(sent1, sent2)
@@ -116,14 +125,14 @@ class AbstractTrainer:
                 sys_scores.extend(sys)
                 gs_scores.extend(gs)
                 running_loss += loss
-            pearsonrs.append(pearsonr(sys_scores, gs_scores)[0])
-            spearmanrs.append(spearmanr(sys_scores, gs_scores)[0])
+        pearson_rs = pearsonr(sys_scores, gs_scores)[0]
+        spearman_rhos = spearmanr(sys_scores, gs_scores)[0]
 
-        avg_pearsonr = np.average(pearsonrs)
-        avg_spearmanr = np.average(spearmanrs)
+        avg_pearson_r = np.average(pearson_rs)
+        avg_spearman_rho = np.average(spearman_rhos)
 
-        results = {'pearson': avg_pearsonr,
-                   'spearman': avg_spearmanr,
+        results = {'pearson': avg_pearson_r,
+                   'spearman': avg_spearman_rho,
                    'nsamples': len(sys_scores),
                    'dev_loss': running_loss}
 
@@ -167,17 +176,36 @@ class AbstractTrainer:
     def modify_batch_embeddings_to_easy_to_compute(self, batch_embeddings):
         padded_sequences = {model_name: [] for model_name in self.model_names}
         padding_masks = {model_name: [] for model_name in self.model_names}
-        for model_name in self.model_names:
-            for i in range(2):
-                padded_sequences[model_name].append(
-                    torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items[i]).to(self.device)
-                                                     for items in [embs[model_name]
-                                                                   for embs in batch_embeddings]], batch_first=True)
-                )
+        try:
+            for model_name in self.model_names:
+                for i in range(2):
+                    if self.device == 'cpu':
+                        padded_sequences[model_name].append(
+                            torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items[i])
+                                                             for items in [embs[model_name]
+                                                                           for embs in batch_embeddings]], batch_first=True)
+                        )
+                    else:
+                        padded_sequences[model_name].append(
+                            torch.nn.utils.rnn.pad_sequence([torch.cuda.FloatTensor(items[i])
+                                                             for items in [embs[model_name]
+                                                                           for embs in batch_embeddings]], batch_first=True)
+                        )
 
-                max_sentence_length = max([len(items[i]) for items in [embs[model_name] for embs in batch_embeddings]])
-                padding_masks[model_name].append(
-                    torch.BoolTensor([[[False] * len(embs[model_name][i]) + [True] * (max_sentence_length - len(embs[model_name][i])) ] for embs in batch_embeddings]).squeeze(1).to(self.device)
-                )
+                    max_sentence_length = max([len(items[i]) for items in [embs[model_name] for embs in batch_embeddings]])
+                    if self.device == 'cpu':
+                        padding_masks[model_name].append(
+                            torch.BoolTensor([[[False] * len(embs[model_name][i]) +
+                                               [True] * (max_sentence_length - len(embs[model_name][i])) ]
+                                              for embs in batch_embeddings]).squeeze(1)
+                        )
+                    else:
+                        padding_masks[model_name].append(
+                            torch.cuda.BoolTensor([[[False] * len(embs[model_name][i]) +
+                                                    [True] * (max_sentence_length - len(embs[model_name][i]))]
+                                                   for embs in batch_embeddings]).squeeze(1)
+                        )
+        except:
+            print("error")
         return padded_sequences, padding_masks
 

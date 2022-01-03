@@ -88,8 +88,13 @@ class GCCA:
                         cross_vectors_b.append(c.copy())
                 else:
                     if flg_diagonal:
-                        cross_vectors_a[col * previous_dim + j].extend(c)
-                        cross_vectors_b[col * previous_dim + j].extend([zero] * len(c))
+                        try:
+                            cross_vectors_a[col * previous_dim + j].extend(c)
+                            cross_vectors_b[col * previous_dim + j].extend([zero] * len(c))
+                        except IndexError:
+                            print(len(cross_vectors_a))
+                            print(len(cross_vectors_a[0]))
+                            print(col * previous_dim + j)
                     else:
                         try:
                             cross_vectors_a[col * previous_dim + j].extend([zero] * len(c))
