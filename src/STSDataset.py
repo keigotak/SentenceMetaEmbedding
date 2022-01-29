@@ -1,7 +1,7 @@
 import sys
 import random
 from pathlib import Path
-
+import torch
 
 class STSDataset:
     def __init__(self, mode='train'):
@@ -19,6 +19,7 @@ class STSDataset:
         self.texts = None
         with self.path.open('r', encoding='utf-8') as f:
             self.texts = [self.get_data_dict(*line.strip().split('\t')) for line in f.readlines()]
+        self.dataloader = torch.utils.data.DataLoader(self.texts, batch_size=self.batch_size, num_workers=4, pin_memory=True)
         self.dataset_size = len(self.texts)
         self.batch_mode = 'full' # full, fixed
 
@@ -42,6 +43,7 @@ class STSDataset:
         else:
             batch = self.texts[self.current:]
             self.current = len(self.texts)
+        # batch = iter(self.dataloader).__next__()
 
         sentences1 = [b['sentence1'] for b in batch]
         sentences2 = [b['sentence2'] for b in batch]
@@ -127,12 +129,19 @@ class MergedSTSDataset(STSDataset):
                 # STS.input.question-question.txt
             for tag in tags:
                 with Path(f'/home/keigo/SentEval/data/downstream/STS/{d}/STS.input.{tag}.txt').open('r') as f:
-                    texts = f.readlines()
-                for text in texts:
-                    sentence1, sentence2 = text.strip().split('\t')
+                    sentences = f.readlines()
+                with Path(f'/home/keigo/SentEval/data/downstream/STS/{d}/STS.gs.{tag}.txt').open('r') as f:
+                    golds = f.readlines()
+
+                for ss, gs in zip(sentences, golds):
+                    sentence1, sentence2 = ss.strip().split('\t')
+                    try:
+                        gold_score = 0.0 if gs.strip() == '' else float(gs.strip())/5.0
+                    except:
+                        print("")
                     if sentence1 in ignore_sentences or sentence2 in ignore_sentences:
                         continue
-                    self.texts.append({'sentence1': sentence1, 'sentence2': sentence2, 'score': 0.0})
+                    self.texts.append({'sentence1': sentence1, 'sentence2': sentence2, 'score': gold_score})
 
         self.dataset_size = len(self.texts)
         self.batch_mode = 'full' # full, fixed

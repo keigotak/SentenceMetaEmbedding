@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 from pathlib import Path
+import pickle
 
 from sentence_transformers import SentenceTransformer
 from AbstractGetSentenceEmbedding import *
@@ -13,14 +14,16 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         super().__init__()
         self.device = get_device(device)
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name, device=self.device)
+        with Path(f'../models/sentence_embeddings_{model_name}.pkl').open('rb') as f:
+            self.model = pickle.load(f)
+        # self.model = SentenceTransformer(model_name, device=self.device)
         # self.model.device = self.device
-        self.model.to(self.device)
-        self.model.eval()
-        self.tokenizer = self.model.tokenizer
-        self.tokenization_mode = 'subword'
+        # self.model.to(self.device)
+        # self.model.eval()
+        # self.tokenizer = self.model.tokenizer
+        self.tokenization_mode = 'pkl'
         self.subword_pooling_method = 'avg'
-        self.sentence_pooling_method = 'max' # max
+        self.sentence_pooling_method = 'avg'
         self.embeddings = {self.model_name: {}}
 
         self.tag = get_now()
@@ -49,11 +52,6 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
 
         self.sentence_id = len(self.sent_to_id)
         self.with_save_embeddings = True
-        self.with_save_word_embeddings = True
-        self.with_embedding_updating = False
-        self.word_embeddings = self.load_model()
-
-
 
     def train(self):
         self.model.train()
@@ -101,43 +99,41 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         return torch.stack(subword_aggregated_embeddings, dim=0)
 
     def get_word_embedding(self, sentence, with_process_subwords=True):
-        if sentence in self.word_embeddings.keys():
-            return self.word_embeddings[sentence]
         # sentence = sentence.replace('`', '')
         # sentence = sentence.replace("'", "")
-        if '�' in sentence:
-            sentence = sentence.replace('� ', '')
-        if 'o ̯ reĝ' in sentence:
-            sentence = sentence.replace('o ̯ reĝ', '')
-        enc = self.model.tokenizer(sentence).encodings[0]
-
-        indexes, subwords, subword_ids = [], [], []
-        index, subword, subword_id = [], [], []
-
-        for i, (o1, o2) in enumerate(zip(enc.offsets, enc.offsets[1:])):
-            if o1 == (0, 0):
-                continue
-            if o1 == o2:
-                index.append(enc.ids[i])
-                subword.append(enc.tokens[i])
-                subword_id.append(enc.ids[i])
-            else:
-                if o1[1] == o2[0]:
-                    index.append(enc.ids[i])
-                    subword.append(enc.tokens[i])
-                    subword_id.append(enc.ids[i])
-                else:
-                    index.append(enc.ids[i])
-                    subword.append(enc.tokens[i])
-                    subword_id.append(enc.ids[i])
-
-                    indexes.append(index)
-                    subwords.append(subword)
-                    subword_ids.append(subword_id)
-
-                    index, subword, subword_id = [], [], []
-        flatten_indexes = [[j] * len(subwords[j]) for j in range(len(subwords))]
-        flatten_indexes = [-1] + [i for index in flatten_indexes for i in index] + [len(subwords)]
+        # if '�' in sentence:
+        #     sentence = sentence.replace('� ', '')
+        # if 'o ̯ reĝ' in sentence:
+        #     sentence = sentence.replace('o ̯ reĝ', '')
+        # enc = self.model.tokenizer(sentence).encodings[0]
+        #
+        # indexes, subwords, subword_ids = [], [], []
+        # index, subword, subword_id = [], [], []
+        #
+        # for i, (o1, o2) in enumerate(zip(enc.offsets, enc.offsets[1:])):
+        #     if o1 == (0, 0):
+        #         continue
+        #     if o1 == o2:
+        #         index.append(enc.ids[i])
+        #         subword.append(enc.tokens[i])
+        #         subword_id.append(enc.ids[i])
+        #     else:
+        #         if o1[1] == o2[0]:
+        #             index.append(enc.ids[i])
+        #             subword.append(enc.tokens[i])
+        #             subword_id.append(enc.ids[i])
+        #         else:
+        #             index.append(enc.ids[i])
+        #             subword.append(enc.tokens[i])
+        #             subword_id.append(enc.ids[i])
+        #
+        #             indexes.append(index)
+        #             subwords.append(subword)
+        #             subword_ids.append(subword_id)
+        #
+        #             index, subword, subword_id = [], [], []
+        # flatten_indexes = [[j] * len(subwords[j]) for j in range(len(subwords))]
+        # flatten_indexes = [-1] + [i for index in flatten_indexes for i in index] + [len(subwords)]
 
         # word_ids = enc.word_ids
         # indexes, subwords = [], []
@@ -150,21 +146,18 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         #     indexes.append(index)
         #     subwords.append(subword)
 
-        emb_sent1 = self.model.encode(sentence, output_value='token_embeddings')
-        emb_sent1 = self.model.forward({'input_ids': torch.as_tensor([enc.ids], dtype=torch.long, device=self.device), 'attention_mask': torch.as_tensor([enc.attention_mask], dtype=torch.long, device=self.device)})
-        emb_sent1 = emb_sent1['token_embeddings'].squeeze(0).cpu().detach().numpy()
+        embedding = [self.model[sentence]]
+        # emb_sent1 = self.model.forward({'input_ids': torch.LongTensor([enc.ids]).to(self.device), 'attention_mask': torch.LongTensor([enc.attention_mask]).to(self.device)})
+        # emb_sent1 = emb_sent1['token_embeddings'].squeeze(0).cpu().detach().numpy()
+        #
+        # if with_process_subwords:
+        #     if self.tokenization_mode == 'subword':
+        #         emb_sent1 = self.process_subword(flatten_indexes, emb_sent1)
+        # else:
+        #     emb_sent1 = torch.FloatTensor(emb_sent1)
+        # embedding = [emb_sent1.squeeze(0).tolist()[1: -1]] # 1, length, embedding_dim
 
-        if with_process_subwords:
-            if self.tokenization_mode == 'subword':
-                emb_sent1 = self.process_subword(flatten_indexes, emb_sent1)
-        else:
-            emb_sent1 = torch.as_tensor(emb_sent1, dtype=torch.float, device=self.device)
-        embedding = [emb_sent1.squeeze(0).tolist()[1: -1]] # 1, length, embedding_dim
-        if sentence not in self.word_embeddings.keys():
-            self.word_embeddings[sentence] = {'ids': indexes, 'tokens': subwords, 'embeddings': embedding}
-            self.with_embedding_updating = True
-
-        return {'ids': indexes, 'tokens': subwords, 'embeddings': embedding}
+        return {'embeddings': embedding}
 
     def get_word_embeddings(self, sent1, sent2):
         ids, tokens, embedding = [], [], []
@@ -191,16 +184,16 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         sentence_embeddings = []
         for sentence in sentences:
             sentence_embedding = self.get_word_embedding(sentence)['embeddings'][0]
-            if self.sentence_pooling_method == 'avg':
-                # sentence_embedding = sentence_embedding[1:-1]
-                sentence_embedding = torch.mean(torch.as_tensor(sentence_embedding, dtype=torch.float, device='cpu').requires_grad_(False), dim=0)
-            elif self.sentence_pooling_method == 'max':
-                # sentence_embedding = sentence_embedding[1:-1]
-                sentence_embedding, _ = torch.max(torch.as_tensor(sentence_embedding, dtype=torch.float, device='cpu').requires_grad_(False), dim=0)
-                # sentence_embedding = sentence_embedding.tolist()
+            # if self.sentence_pooling_method == 'avg':
+            #     # sentence_embedding = sentence_embedding[1:-1]
+            #     sentence_embedding = torch.mean(torch.FloatTensor(sentence_embedding).requires_grad_(False), dim=0).tolist()
+            # elif self.sentence_pooling_method == 'max':
+            #     # sentence_embedding = sentence_embedding[1:-1]
+            #     sentence_embedding, _ = torch.max(torch.FloatTensor(sentence_embedding).requires_grad_(False), dim=0)
+            #     sentence_embedding = sentence_embedding.tolist()
             sentence_embeddings.append(sentence_embedding)  # get token embeddings
-            self.embeddings[model_name][sentence] = sentence_embedding.tolist()
-        return torch.stack(sentence_embeddings).numpy()
+            self.embeddings[model_name][sentence] = sentence_embedding.copy()
+        return np.array(sentence_embeddings)
 
     def save_information_file(self):
         information_file = Path(self.information_file)
@@ -218,31 +211,19 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         self.save_model_path = f'../models/sberts-{self.tag}.pkl'
         self.information_file = f'../results/sberts/info-{self.tag}.txt'
 
-    def save_model(self):
-        with Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt').open('wb') as f:
-            torch.save(self.word_embeddings, f)
-
-    def load_model(self):
-        path = Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt')
-        if path.exists():
-            with Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt').open('rb') as f:
-                return torch.load(f)
-        return {}
-
 
 class GetSentenceBertEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
-        # os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+        os.environ["CUDA_VISIBLE_DEVICES"] = "1"
         super().__init__()
         # self.model_names = ['roberta-large-nli-stsb-mean-tokens',
         #                     'roberta-base-nli-stsb-mean-tokens',
         #                     'bert-large-nli-stsb-mean-tokens',
         #                     'distilbert-base-nli-stsb-mean-tokens']
-        # self.model_names = ['stsb-bert-large', 'stsb-roberta-large', 'stsb-distilbert-base']
-        self.model_names = ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']
+        self.model_names = ['stsb-bert-large', 'stsb-roberta-large', 'stsb-distilbert-base']
         self.embeddings = {model_name: {} for model_name in self.model_names}
         self.with_reset_output_file = False
-        self.with_save_embeddings = True
+        self.with_save_embeddings = False
 
     def get_model(self):
         self.model = SentenceTransformer(self.model_name)
@@ -279,11 +260,11 @@ if __name__ == '__main__':
             import os
             os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
-        for model_name in ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']:
+        # for model_name in ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']:
         # for model_name in ['gpt2', 'facebook/bart-base']:
         # for model_name in ['stsb-xlm-r-multilingual']: # ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']:
         # for model_name in ['stsb-mpnet-base-v2']:
-        # for model_name in ['stsb-bert-large', 'stsb-roberta-large', 'stsb-distilbert-base']:
+        for model_name in ['stsb-bert-large', 'stsb-roberta-large', 'stsb-distilbert-base']:
             cls = GetSentenceBertWordEmbedding(model_name=model_name, device=args.device)
             cls.set_tag(get_now())
             print(f'{model_name}, {cls.sentence_pooling_method}')
@@ -291,7 +272,6 @@ if __name__ == '__main__':
             cls.single_eval(model_name)
             if cls.with_reset_output_file:
                 cls.with_reset_output_file = False
-            cls.save_model()
 
 
 
@@ -303,97 +283,6 @@ STS12-16を全てまとめて学習する
 単語で位置がどう変わるか
 文を３つAB高い，ACは低い　Aは基準で-0.5, 0.0, 0.5の3点がある．
 メタembeddingはソースに引っ張られるのでそれを見せられるようにする．
-max
-         bert-large-nli-stsb-mean-tokens      pearson-wmean     spearman-wmean       pearson-mean      spearman-mean
-                               STS12-all              80.71              78.67              78.42              75.67
-                               STS13-all              88.26              87.42              80.29              79.56
-                               STS14-all              91.38              90.30              92.34              91.54
-                               STS15-all              87.15              87.34              85.03              85.10
-                               STS16-all              81.98              83.05              81.77              82.85
-                        STSBenchmark-all              82.40              82.74                  -                  -
-roberta-large-nli-stsb-mean-tokens, max
-      roberta-large-nli-stsb-mean-tokens      pearson-wmean     spearman-wmean       pearson-mean      spearman-mean
-                               STS12-all              68.71              68.91              66.90              66.68
-                               STS13-all              79.58              79.32              68.21              68.18
-                               STS14-all              79.60              81.57              79.28              81.76
-                               STS15-all              75.94              78.69              72.44              75.80
-                               STS16-all              72.96              75.20              72.71              74.95
-                        STSBenchmark-all              82.46              83.75                  -                  -
-
-
-avg
-         bert-large-nli-stsb-mean-tokens      pearson-wmean     spearman-wmean       pearson-mean      spearman-mean
-                               STS12-all              80.74              78.78              78.08              75.59
-                               STS13-all              89.76              88.89              83.01              82.42
-                               STS14-all              92.37              90.93              93.42              92.23
-                               STS15-all              88.29              88.22              86.36              86.12
-                               STS16-all              83.24              84.02              83.00              83.78
-                        STSBenchmark-all              83.66              84.05                  -                  -
-
-
-      roberta-large-nli-stsb-mean-tokens      pearson-wmean     spearman-wmean       pearson-mean      spearman-mean
-                               STS12-all              78.32              76.93              74.81              73.41
-                               STS13-all              88.30              87.15              81.53              80.23
-                               STS14-all              91.72              90.18              92.63              91.23
-                               STS15-all              87.72              87.88              85.74              85.81
-                               STS16-all              84.55              84.93              84.21              84.58
-                        STSBenchmark-all              82.46              83.26                  -                  -
-
-
-stsb-bert-large, avg
-/home/keigo/.pyenv/versions/anaconda3-5.2.0/lib/python3.6/site-packages/SentEval-0.1.0-py3.6.egg/senteval/sts.py:42: VisibleDeprecationWarning: Creating an ndarray from ragged nested sequences (which is a list-or-tuple of lists-or-tuples-or ndarrays with different lengths or shapes) is deprecated. If you meant to do this, you must specify 'dtype=object' when creating the ndarray
-/home/keigo/.pyenv/versions/anaconda3-5.2.0/lib/python3.6/site-packages/SentEval-0.1.0-py3.6.egg/senteval/sts.py:43: VisibleDeprecationWarning: Creating an ndarray from ragged nested sequences (which is a list-or-tuple of lists-or-tuples-or ndarrays with different lengths or shapes) is deprecated. If you meant to do this, you must specify 'dtype=object' when creating the ndarray
-                         stsb-bert-large      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
-                               STS12-all              80.74              78.78              78.08              75.59
-                               STS13-all              89.76              88.89              83.01              82.42
-                               STS14-all              92.37              90.93              93.42              92.23
-                               STS15-all              88.29              88.22              86.36              86.12
-                               STS16-all              83.24              84.02              83.00              83.78
-                        STSBenchmark-all              83.66              84.05                  -                  -
-stsb-roberta-large, avg
-                      stsb-roberta-large      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
-                               STS12-all              78.32              76.94              74.81              73.42
-                               STS13-all              88.30              87.15              81.53              80.23
-                               STS14-all              91.72              90.18              92.63              91.23
-                               STS15-all              87.72              87.88              85.74              85.81
-                               STS16-all              84.55              84.93              84.21              84.58
-                        STSBenchmark-all              82.46              83.26                  -                  -
-stsb-distilbert-base, avg
-                    stsb-distilbert-base      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
-                               STS12-all              77.69              76.26              74.02              71.96
-                               STS13-all              88.48              87.82              81.39              80.84
-                               STS14-all              91.49              89.97              92.70              91.43
-                               STS15-all              86.34              86.48              84.13              84.18
-                               STS16-all              82.59              83.32              82.26              82.96
-                        STSBenchmark-all              83.40              83.67                  -                  -
-
-stsb-bert-large, max
-/home/keigo/.pyenv/versions/anaconda3-5.2.0/lib/python3.6/site-packages/SentEval-0.1.0-py3.6.egg/senteval/sts.py:42: VisibleDeprecationWarning: Creating an ndarray from ragged nested sequences (which is a list-or-tuple of lists-or-tuples-or ndarrays with different lengths or shapes) is deprecated. If you meant to do this, you must specify 'dtype=object' when creating the ndarray
-/home/keigo/.pyenv/versions/anaconda3-5.2.0/lib/python3.6/site-packages/SentEval-0.1.0-py3.6.egg/senteval/sts.py:43: VisibleDeprecationWarning: Creating an ndarray from ragged nested sequences (which is a list-or-tuple of lists-or-tuples-or ndarrays with different lengths or shapes) is deprecated. If you meant to do this, you must specify 'dtype=object' when creating the ndarray
-                         stsb-bert-large      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
-                               STS12-all              80.71              78.67              78.42              75.67
-                               STS13-all              88.26              87.42              80.29              79.56
-                               STS14-all              91.38              90.30              92.34              91.54
-                               STS15-all              87.15              87.34              85.03              85.10
-                               STS16-all              81.98              83.05              81.77              82.85
-                        STSBenchmark-all              82.40              82.74                  -                  -
-stsb-roberta-large, max
-                      stsb-roberta-large      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
-                               STS12-all              68.71              68.91              66.91              66.69
-                               STS13-all              79.58              79.32              68.21              68.18
-                               STS14-all              79.60              81.57              79.28              81.76
-                               STS15-all              75.94              78.69              72.44              75.80
-                               STS16-all              72.96              75.20              72.71              74.95
-                        STSBenchmark-all              82.46              83.75                  -                  -
-stsb-distilbert-base, max
-                    stsb-distilbert-base      pearson-wmean     spearman-wmean        pearso-mean     spearman-wmean
-                               STS12-all              76.78              75.80              73.65              71.87
-                               STS13-all              85.98              85.48              76.79              76.31
-                               STS14-all              89.53              88.93              90.18              90.03
-                               STS15-all              84.04              85.04              81.44              82.45
-                               STS16-all              80.27              81.57              80.03              81.30
-                        STSBenchmark-all              82.32              82.65                  -                  -
-
 
 there is a certain physical distance within which some other entity can participate in an event ( typically perception or manipulation ) with the participant. alternatively , the event may be indicated metonymically by a instrument . [ note the connection with * distance , sufficiency , and capability. words in this frame can generally be paraphrased " close enough to be able to " . ]
 [[-0.01814483 -0.12344421  0.04544263 ...  0.06656019  0.02028461,  -0.02380267], [ 0.08801881 -0.13987686 -0.10606434 ...  0.02950472  0.04954498,  -0.02610875], [ 0.02853095 -0.32427612 -0.06939633 ...  0.08875471  0.02078654,  -0.0742402 ], ..., [ 0.03648302 -0.11451291  0.07402899 ... -0.00294275 -0.02224921,  -0.05778958], [ 0.09217613  0.02251625  0.0576703  ...  0.02815251 -0.08181024,  -0.06141173], [ 0.02454806 -0.08518206  0.04093451 ...  0.04033475 -0.06351527,  -0.03479177]]

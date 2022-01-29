@@ -29,7 +29,7 @@ class AbstractGetSentenceEmbedding:
 
     def get_params(self):
         # return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'usepytorch': True, 'batch_size': 10000}
-        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'batch_size': 10000}
+        return {'task_path': '/clwork/keigo/SentenceMetaEmbedding/data', 'batch_size': 512}
 
     def single_eval(self, model_name):
         self.model = self.get_model()
@@ -45,7 +45,7 @@ class AbstractGetSentenceEmbedding:
         print_header = [model_name, 'pearson-r', 'peason-p_val', 'spearman-r', 'spearman-p_val', 'n_samples']
         print_contents = [print_header]
 
-        print_all_header = [model_name, 'pearson-wmean', 'spearman-wmean', 'pearso-mean', 'spearman-wmean']
+        print_all_header = [model_name, 'pearson-wmean', 'spearman-wmean', 'pearson-mean', 'spearman-mean']
         print_all_contents = [print_all_header]
 
         for task in results:
@@ -129,17 +129,17 @@ class AbstractGetSentenceEmbedding:
                     words = [w for w in words if w != '�']
                     # print(words)
                     item = self.model.source[model_name].get_word_embedding(' '.join(words))
-                    items.append(torch.FloatTensor(item['embeddings'][0]))
-            padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
+                    items.append(torch.as_tensor(item['embeddings'][0], dtype=torch.float, device=self.device))
+            padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True)
             # padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items['embeddings'][0][1:-1])
             #                                      for items in [self.model.source[model_name].get_word_embedding(' '.join(words))
             #                                                    for words in batch_words]], batch_first=True).to(self.device)
 
             max_sentence_length = max([len(words) for words in batch_words])
-            padding_masks[model_name] = torch.BoolTensor([[[False] * len(words) + [True] * (max_sentence_length - len(words)) ] for words in batch_words]).squeeze(1).to(self.device)
+            padding_masks[model_name] = torch.as_tensor([[[False] * len(words) + [True] * (max_sentence_length - len(words)) ] for words in batch_words], dtype=torch.bool, device=self.device).squeeze(1)
 
         max_sentence_length = [padded_sequences[k].shape[1] for k in padded_sequences.keys()]
-        padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
+        # padded_sequences[model_name] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True).to(self.device)
         return padded_sequences, padding_masks
 
 

@@ -3,6 +3,7 @@ from scipy.sparse.linalg import eigs
 from scipy.linalg import eig #eigh
 import pickle
 from pathlib import Path
+import torch
 
 
 class GCCA:
@@ -48,6 +49,7 @@ class GCCA:
         :return: None
         '''
         centerized_vectors = [self.centering(vector) for vector in vectors]  # centerized by average for each column
+        embedding_dims = [len(c[0]) for c in centerized_vectors]
 
         ## getting covariance matrix for each src embedding pair of
         covariance_matrices = [] # dict にする
@@ -67,7 +69,7 @@ class GCCA:
         cross_vectors_b = [] # not diagonal
         flg_new_row = False
         flg_diagonal = False
-        col, previous_dim = 0, 0
+        col, previous_dims = 0, 0
         zero = 1e-10
         for i, cm in enumerate(covariance_matrices):  ## for each covariance matrix
             if i % len(vectors) == 0:
@@ -89,22 +91,23 @@ class GCCA:
                 else:
                     if flg_diagonal:
                         try:
-                            cross_vectors_a[col * previous_dim + j].extend(c)
-                            cross_vectors_b[col * previous_dim + j].extend([zero] * len(c))
+                            cross_vectors_a[sum(embedding_dims[:col]) + j].extend(c)
+                            cross_vectors_b[sum(embedding_dims[:col]) + j].extend([zero] * len(c))
                         except IndexError:
                             print(len(cross_vectors_a))
                             print(len(cross_vectors_a[0]))
-                            print(col * previous_dim + j)
+                            print(sum(embedding_dims[:col]) + j)
                     else:
                         try:
-                            cross_vectors_a[col * previous_dim + j].extend([zero] * len(c))
-                            cross_vectors_b[col * previous_dim + j].extend(c)
+                            cross_vectors_a[sum(embedding_dims[:col]) + j].extend([zero] * len(c))
+                            cross_vectors_b[sum(embedding_dims[:col]) + j].extend(c)
                         except IndexError:
                             print(len(cross_vectors_a))
                             print(len(cross_vectors_a[0]))
-                            print(col*previous_dim + j)
+                            print(sum(embedding_dims[:col]) + j)
             flg_new_row = False
             flg_diagonal = False
+
 
         ## solving generalized eigen equation
         eigen_values, eigen_vectors = eig(a=np.array(cross_vectors_a), b=np.array(cross_vectors_b)) # in ascending order
@@ -171,17 +174,21 @@ if __name__ == '__main__':
     np.random.seed(0)
     x1 = np.random.randn(5, 10)
     x2 = np.random.randn(5, 12)
+    x3 = np.random.randn(5, 15)
     # x1 = [[40, 80], [80, 90], [90, 100]]
     # x2 = [[40, 80], [80, 90], [90, 100]]
 
     gcca = GCCA()
     print(gcca.get_covariance_matrics(x1, x2))
-    gcca.prepare([x1, x2])
+    print(gcca.get_covariance_matrics(x1, x3))
+    print(gcca.get_covariance_matrics(x2, x3))
 
-    gcca.fit([x1, x2])
+    gcca.prepare([x1, x2, x3])
+
+    gcca.fit([x1, x2, x3])
 
     print(gcca.eta)
     print(gcca.eta[0].shape)
     print(gcca.eta[1].shape)
 
-    gcca.transform([x1, x2])
+    gcca.transform([x1, x2, x3])

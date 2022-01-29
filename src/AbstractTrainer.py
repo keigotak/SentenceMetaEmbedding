@@ -3,6 +3,7 @@ from tqdm import tqdm
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
+import dask
 import numpy as np
 import torch
 import torch.nn as nn
@@ -31,10 +32,6 @@ class AbstractTrainer:
         # self.optimizer = torch.optim.AdamW(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
         self.tag = get_now()
-        self.cos0 = nn.CosineSimilarity(dim=0)
-        self.cos1 = nn.CosineSimilarity(dim=1)
-        self.cos2 = nn.CosineSimilarity(dim=2)
-        self.cose1 = nn.CosineEmbeddingLoss()
         self.vw = ValueWatcher()
 
     def batch_step(self, batch_embeddings, scores, tokens, with_training=False, with_calc_similality=False):
@@ -53,9 +50,9 @@ class AbstractTrainer:
             sentences1, sentences2, scores = self.datasets[mode].get_batch()
 
             ## get vector representation for each embedding and batch data
-            batch_embeddings = []
-            batch_tokens = []
-            with torch.no_grad():
+            with torch.inference_mode(): # this line must be allocate outside of self.batch_step scope
+                batch_embeddings = []
+                batch_tokens = []
                 for sent1, sent2 in zip(sentences1, sentences2):
                     embeddings = {}
                     tokens = {}
@@ -99,13 +96,13 @@ class AbstractTrainer:
 
         # batch loop
         sys_scores, gs_scores = [], []
-        while not self.datasets[mode].is_batch_end():
-            sentences1, sentences2, scores = self.datasets[mode].get_batch()
+        with torch.inference_mode():
+            while not self.datasets[mode].is_batch_end():
+                sentences1, sentences2, scores = self.datasets[mode].get_batch()
 
-            # get vector representation for each embedding
-            batch_embeddings = []
-            batch_tokens = []
-            with torch.no_grad():
+                # get vector representation for each embedding
+                batch_embeddings = []
+                batch_tokens = []
                 for sent1, sent2 in zip(sentences1, sentences2):
                     # sent1 = 'the president has fewer powers than it seems , overshadowed particularly by supreme guide ayatollah ali khamenei .'
                     # sent2 = 'the president has less of capacities than it does not appear to with it , and it particuli � rement is particuli � rement eclipsed by the guide supr � me the ayatollah ali khamenei .'
@@ -179,32 +176,17 @@ class AbstractTrainer:
         try:
             for model_name in self.model_names:
                 for i in range(2):
-                    if self.device == 'cpu':
-                        padded_sequences[model_name].append(
-                            torch.nn.utils.rnn.pad_sequence([torch.FloatTensor(items[i])
-                                                             for items in [embs[model_name]
-                                                                           for embs in batch_embeddings]], batch_first=True)
-                        )
-                    else:
-                        padded_sequences[model_name].append(
-                            torch.nn.utils.rnn.pad_sequence([torch.cuda.FloatTensor(items[i])
-                                                             for items in [embs[model_name]
-                                                                           for embs in batch_embeddings]], batch_first=True)
-                        )
-
+                    padded_sequences[model_name].append(
+                        torch.nn.utils.rnn.pad_sequence([torch.as_tensor(items[i], dtype=torch.float, device=self.device)
+                                                         for items in [embs[model_name]
+                                                                       for embs in batch_embeddings]], batch_first=True)
+                    )
                     max_sentence_length = max([len(items[i]) for items in [embs[model_name] for embs in batch_embeddings]])
-                    if self.device == 'cpu':
-                        padding_masks[model_name].append(
-                            torch.BoolTensor([[[False] * len(embs[model_name][i]) +
-                                               [True] * (max_sentence_length - len(embs[model_name][i])) ]
-                                              for embs in batch_embeddings]).squeeze(1)
-                        )
-                    else:
-                        padding_masks[model_name].append(
-                            torch.cuda.BoolTensor([[[False] * len(embs[model_name][i]) +
-                                                    [True] * (max_sentence_length - len(embs[model_name][i]))]
-                                                   for embs in batch_embeddings]).squeeze(1)
-                        )
+                    padding_masks[model_name].append(
+                        torch.as_tensor([[[False] * len(embs[model_name][i]) +
+                                           [True] * (max_sentence_length - len(embs[model_name][i])) ]
+                                          for embs in batch_embeddings], dtype=torch.bool, device=self.device).squeeze(1)
+                    )
         except:
             print("error")
         return padded_sequences, padding_masks

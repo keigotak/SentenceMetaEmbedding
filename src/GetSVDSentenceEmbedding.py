@@ -8,10 +8,10 @@ class GetSVDSentenceEmbedding(AbstractGetSentenceEmbedding):
         super().__init__()
         self.model_names = ['svd']
         self.embeddings = {model_name: {} for model_name in self.model_names}
-        self.output_file_name = 'svd.txt'
         self.with_reset_output_file = False
         self.with_save_embeddings = False
-        self.tag = '12202021230408819021' # '04072021215506466248'
+        self.tag = '01122022184319086520' # '01112022204815661173' # '01082022070340899941' # '01032022161750908240' # '04072021215506466248'
+        self.output_file_name = 'svd.txt'
 
         self.indexer = None
 

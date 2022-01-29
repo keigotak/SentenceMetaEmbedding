@@ -12,9 +12,11 @@ from GCCA import GCCA
 #               "../models/sentence_embeddings_use.pkl"]
 # model_pkls = ["../models/sentence_embeddings_bert-large-nli-stsb-mean-tokens.pkl",
 #               "../models/sentence_embeddings_roberta-large-nli-stsb-mean-tokens.pkl"]
+# model_pkls = ["../models/sentence_embeddings_stsb-bert-large.pkl",
+#               "../models/sentence_embeddings_stsb-distilbert-base.pkl",
+#               "../models/sentence_embeddings_stsb-roberta-large.pkl"]
 model_pkls = ["../models/sentence_embeddings_stsb-bert-large.pkl",
-              "../models/sentence_embeddings_stsb-distilbert-base.pkl",
-              "../models/sentence_embeddings_stsb-roberta-large.pkl"]
+              "../models/sentence_embeddings_stsb-distilbert-base.pkl"]
 
 embeddings = {}
 for model_pkl in model_pkls:
