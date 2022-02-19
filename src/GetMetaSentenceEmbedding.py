@@ -6,7 +6,7 @@ from AbstractGetSentenceEmbedding import *
 
 class GetMetaSentenceEmbedding(AbstractGetSentenceEmbedding):
     def __init__(self):
-        os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+        os.environ["CUDA_VISIBLE_DEVICES"] = "7"
         super().__init__()
         self.sentence_pooling_method = 'max'
         self.model_names = ['concat'] # 'avg',
