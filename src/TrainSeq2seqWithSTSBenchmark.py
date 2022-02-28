@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
@@ -138,7 +138,7 @@ class TrainSeq2seqWithSTSBenchmark(AbstractTrainer):
                 nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
         return gs_scores, sys_scores, running_loss
 

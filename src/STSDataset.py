@@ -127,19 +127,19 @@ class STSDataset(STSBenchmarkDataset):
             for ss, gs in zip(sentences, golds):
                 sentence1, sentence2 = ss.strip().split('\t')
                 try:
-                    gold_score = 0.0 if gs.strip() == '' else float(Decimal(gs.strip())/Decimal(5.0))
+                    if gs.strip() == '':
+                        continue
+                    else:
+                        gold_score = float(Decimal(gs.strip())/Decimal(5.0))
+                        self.texts.append(
+                            {'sentence1': sentence1, 'sentence2': sentence2, 'score': gold_score, 'tag': tag})
                 except:
                     print("")
-                self.texts.append({'sentence1': sentence1, 'sentence2': sentence2, 'score': gold_score, 'tag': tag})
 
         self.dataset_size = len(self.texts)
-        self.batch_mode = 'full' # full, fixed
+        # self.batch_mode = 'full' # full, fixed
 
         # print(self.texts)
-
-    def shuffle(self):
-        for tag in self.tags:
-            random.shuffle(self.texts[tag])
 
     def get_batch(self):
         if self.current + self.batch_size < len(self.texts):
@@ -153,20 +153,12 @@ class STSDataset(STSBenchmarkDataset):
         sentences1 = [b['sentence1'] for b in batch]
         sentences2 = [b['sentence2'] for b in batch]
         scores = [b['score'] for b in batch]
-        return sentences1, sentences2, scores
-
-    def reset(self, with_shuffle=False):
-        self.current = 0
-        if with_shuffle:
-            self.shuffle()
+        tags = [b['tag'] for b in batch]
+        return sentences1, sentences2, scores, tags
 
     def is_batch_end(self):
-        if self.batch_mode == 'full':
-            if self.current == self.dataset_size:
-                return True
-        elif self.batch_mode == 'fixed':
-            if self.current >= int(self.dataset_size / 10 + 0.5):
-                return True
+        if self.current >= self.dataset_size:
+            return True
         return False
 
     def __str__(self):
@@ -176,7 +168,7 @@ class STSDataset(STSBenchmarkDataset):
 
 
 if __name__ == '__main__':
-    s = STSDataset()
+    s = STSDataset('STS15')
     while not s.is_batch_end():
         print(s.get_batch())
     # s = STSBenchmarkDataset()

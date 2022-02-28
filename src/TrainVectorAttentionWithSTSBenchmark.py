@@ -67,9 +67,9 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.with_train_model = False
         self.loss_mode = 'rscore' # word, cos, rscore
 
-        self.alpha = nn.Linear(1, 1, bias=False, device=self.device)
-        self.lam = nn.Linear(1, 1, bias=False, device=self.device)
-        self.beta = nn.Linear(1, 1, bias=False, device=self.device)
+        self.alpha = nn.Linear(1, 1, bias=False).to(device=self.device)
+        self.lam = nn.Linear(1, 1, bias=False).to(device=self.device)
+        self.beta = nn.Linear(1, 1, bias=False).to(device=self.device)
         if self.with_train_coefficients:
             self.parameters = list(self.va.parameters()) + list(self.alpha.parameters()) + list(self.lam.parameters()) + list(self.beta.parameters())
         else:
@@ -93,7 +93,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         super().__init__()
 
         self.batch_size = 512
-        self.datasets['train'].batch_size = self.batch_size
+        self.datasets_stsb['train'].batch_size = self.batch_size
         self.information_file = f'../results/vec_attention/info-{self.tag}.txt'
         self.vw.threshold = 5
 
@@ -351,7 +351,7 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         super().__init__()
 
         self.batch_size = hyper_params['batch_size']
-        self.datasets['train'].batch_size = self.batch_size
+        self.datasets_stsb['train'].batch_size = self.batch_size
 
 
 class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
@@ -449,7 +449,7 @@ if __name__ == '__main__':
         while not vw.is_over():
             print(f'epoch: {vw.epoch}')
             cls.model.train_epoch()
-            cls.model.datasets['train'].reset(with_shuffle=True)
+            cls.model.datasets_stsb['train'].reset(with_shuffle=True)
             rets = cls.model.inference(mode='dev')
             if es_metrics == 'pearson':
                 vw.update(rets[es_metrics])

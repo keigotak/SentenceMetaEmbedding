@@ -11,7 +11,7 @@ import torch.nn as nn
 from scipy.stats import spearmanr, pearsonr
 from senteval.utils import cosine
 
-from STSDataset import STSBenchmarkDataset
+from STSDataset import STSBenchmarkDataset, STSDataset
 from GetHuggingfaceEmbedding import GetHuggingfaceWordEmbedding
 from AttentionModel import MultiheadSelfAttentionModel, AttentionModel
 from AbstractGetSentenceEmbedding import *
@@ -26,9 +26,10 @@ class AbstractTrainer:
         self.dataset_type = 'normal'
         self.datasets_stsb = {mode: STSBenchmarkDataset(mode=mode) for mode in ['train', 'dev', 'test']}
         self.datasets_sts = {mode: STSDataset(mode=mode) for mode in ['STS12', 'STS13', 'STS14', 'STS15', 'STS16']}
-        self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
-        # self.optimizer = torch.optim.AdamW(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
+        # self.optimizer = torch.optim.SGD(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
+        self.optimizer = torch.optim.AdamW(self.parameters, lr=self.learning_ratio, weight_decay=self.weight_decay)
         self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
+        self.cosine_similarity = torch.nn.CosineSimilarity(dim=2)
         self.tag = get_now()
         self.vw = ValueWatcher()
 
@@ -102,8 +103,8 @@ class AbstractTrainer:
                 batch_embeddings = []
                 batch_tokens = []
                 for sent1, sent2 in zip(sentences1, sentences2):
-                    # sent1 = 'the president has fewer powers than it seems , overshadowed particularly by supreme guide ayatollah ali khamenei .'
-                    # sent2 = 'the president has less of capacities than it does not appear to with it , and it particuli � rement is particuli � rement eclipsed by the guide supr � me the ayatollah ali khamenei .'
+                    # sent1 = 'a man with a hard hat is dancing .'
+                    # sent2 = 'a man wearing a hard hat is dancing .'
                     # sent1 = 'the english word " right " comes from proto-indo-european word o ̯ reĝtos which meant " correct " and had cognates o ̯ reĝr " directive , order " , o ̯ reĝs " king , ruler " , o ̯ reĝti " guides , directs " , o ̯ reĝi ̯ om " kingdom " .'
                     # sent1 = 'the english word " right " comes from proto-indo-european word o ̯ reĝtos which meant " correct " and had cognates o ̯ reĝr " directive , order " , o ̯ reĝs " king , ruler " , o ̯ reĝti " guides , directs " , o ̯ reĝi ̯ om " kingdom " .'
                     embeddings = {}
@@ -149,10 +150,10 @@ class AbstractTrainer:
         pearson_rs, spearman_rhos = [], []
 
         # batch loop
-        sys_scores, gs_scores = [], []
+        sys_scores, gs_scores, tag_sequence = [], [], []
         with torch.inference_mode():
-            while not self.mergeddatasets_sts[mode].is_batch_end():
-                sentences1, sentences2, scores = self.datasets_sts[mode].get_batch()
+            while not self.datasets_sts[mode].is_batch_end():
+                sentences1, sentences2, scores, tags = self.datasets_sts[mode].get_batch()
 
                 # get vector representation for each embedding
                 batch_embeddings = []
@@ -175,6 +176,7 @@ class AbstractTrainer:
                 gs, sys, loss = self.batch_step(batch_embeddings, scores, with_calc_similality=True)
                 sys_scores.extend(sys)
                 gs_scores.extend(gs)
+                tag_sequence.extend(tags)
                 running_loss += loss
         pearson_rs = pearsonr(sys_scores, gs_scores)[0]
         spearman_rhos = spearmanr(sys_scores, gs_scores)[0]
@@ -185,15 +187,19 @@ class AbstractTrainer:
         results = {'pearson': avg_pearson_r,
                    'spearman': avg_spearman_rho,
                    'nsamples': len(sys_scores),
-                   'dev_loss': running_loss}
+                   'dev_loss': running_loss,
+                   'sys_scores': sys_scores,
+                   'gold_scores': gs_scores,
+                   'tags': tag_sequence
+                   }
 
         print_contents = [f'STSBenchmark-{mode}',
                           f'pearson: {self.get_round_score(results["pearson"]) :.2f}',
                           f'spearman: {self.get_round_score(results["spearman"]) :.2f}']
         results['prints'] = print_contents
 
-        print(f'[{mode}] ' + str(self.datasets_sts[mode]) + f' loss: {running_loss}')
-        print(' '.join(print_contents))
+        # print(f'[{mode}] ' + str(self.datasets_sts[mode]) + f' loss: {running_loss}')
+        # print(' '.join(print_contents))
 
         self.datasets_sts[mode].reset()
 

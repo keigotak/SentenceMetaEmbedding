@@ -16,7 +16,6 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         self.model = SentenceTransformer(model_name, device=self.device)
         # self.model.device = self.device
         self.model.to(self.device)
-        self.model.eval()
         self.tokenizer = self.model.tokenizer
         self.tokenization_mode = 'subword'
         self.subword_pooling_method = 'avg'
@@ -51,7 +50,13 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         self.with_save_embeddings = True
         self.with_save_word_embeddings = True
         self.with_embedding_updating = False
-        self.word_embeddings = self.load_model()
+        self.with_train_model = True
+        if self.with_train_model:
+            self.model.train()
+            self.word_embeddings = {}
+        else:
+            self.model.eval()
+            self.word_embeddings = self.load_model()
 
 
 
@@ -101,7 +106,7 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         return torch.stack(subword_aggregated_embeddings, dim=0)
 
     def get_word_embedding(self, sentence, with_process_subwords=True):
-        if sentence in self.word_embeddings.keys():
+        if sentence in self.word_embeddings.keys() and not self.with_train_model:
             return self.word_embeddings[sentence]
         # sentence = sentence.replace('`', '')
         # sentence = sentence.replace("'", "")
@@ -139,17 +144,6 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         flatten_indexes = [[j] * len(subwords[j]) for j in range(len(subwords))]
         flatten_indexes = [-1] + [i for index in flatten_indexes for i in index] + [len(subwords)]
 
-        # word_ids = enc.word_ids
-        # indexes, subwords = [], []
-        # for i in range(word_ids[-2] + 1):
-        #     index, subword = [], []
-        #     for t, w in zip(enc.tokens, word_ids):
-        #         if w == i:
-        #             index.append(w)
-        #             subword.append(t)
-        #     indexes.append(index)
-        #     subwords.append(subword)
-
         emb_sent1 = self.model.encode(sentence, output_value='token_embeddings')
         emb_sent1 = self.model.forward({'input_ids': torch.as_tensor([enc.ids], dtype=torch.long, device=self.device), 'attention_mask': torch.as_tensor([enc.attention_mask], dtype=torch.long, device=self.device)})
         emb_sent1 = emb_sent1['token_embeddings'].squeeze(0).cpu().detach().numpy()
@@ -160,8 +154,10 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         else:
             emb_sent1 = torch.as_tensor(emb_sent1, dtype=torch.float, device=self.device)
         embedding = [emb_sent1.squeeze(0).tolist()[1: -1]] # 1, length, embedding_dim
-        if sentence not in self.word_embeddings.keys():
+        if sentence not in self.word_embeddings.keys() and not self.with_train_model:
             self.word_embeddings[sentence] = {'ids': indexes, 'tokens': subwords, 'embeddings': embedding}
+            self.with_embedding_updating = True
+        elif self.with_train_model:
             self.with_embedding_updating = True
 
         return {'ids': indexes, 'tokens': subwords, 'embeddings': embedding}
@@ -223,10 +219,11 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
             torch.save(self.word_embeddings, f)
 
     def load_model(self):
-        path = Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt')
-        if path.exists():
-            with Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt').open('rb') as f:
-                return torch.load(f)
+        if not self.with_train_model:
+            path = Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt')
+            if path.exists():
+                with Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt').open('rb') as f:
+                    return torch.load(f)
         return {}
 
 
