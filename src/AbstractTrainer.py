@@ -205,7 +205,6 @@ class AbstractTrainer:
 
         return results
 
-
     def save_model(self):
         raise NotImplementedError
 
@@ -222,6 +221,7 @@ class AbstractTrainer:
 
         with information_file.open('a') as f:
             f.write('\n'.join(results))
+            f.write('\n')
 
     def save_information_file(self):
         information_file = Path(self.information_file)

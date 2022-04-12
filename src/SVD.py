@@ -25,7 +25,7 @@ class SVD:
         self.mean_vector = None
 
     def prepare(self, all_vectors):
-        mean_vectors = [v.mean(dim=0) for v in all_vectors]
+        mean_vectors = [torch.mean(torch.as_tensor(v), dim=0) for v in all_vectors]
 
         # for vectors in all_vectors:
         #     m = np.mean(vectors, axis=0)
@@ -33,7 +33,7 @@ class SVD:
         self.mean_vector = mean_vectors
 
     def fit(self, vectors):
-        centerized_vectors = [vectors[i] - self.mean_vector[i] for i in range(len(vectors))]
+        centerized_vectors = [torch.as_tensor(vectors[i]) - self.mean_vector[i] for i in range(len(vectors))]
         backend = 'dask'
         if backend == 'torch':
             concat_vectors = torch.cat(centerized_vectors, dim=1)
@@ -48,7 +48,7 @@ class SVD:
 
 
     def transform(self, vectors):
-        centerized_vectors = [vectors[i] - self.mean_vector[i] for i in range(len(vectors))]
+        centerized_vectors = [torch.as_tensor(vectors[i]) - self.mean_vector[i] for i in range(len(vectors))]
         # ret = np.einsum('pq, rs->rq', self.VT, np.concatenate(centerized_vectors, axis=1)) # 22 * 22, 5 * 22
         # ret = da.compute(da.einsum('pq,rs->rq', self.VT.numpy(), np.concatenate(centerized_vectors, axis=1)))
         ret = da.compute(da.matmul(np.concatenate(centerized_vectors, axis=1), self.VT.numpy()))

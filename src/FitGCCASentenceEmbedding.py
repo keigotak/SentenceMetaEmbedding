@@ -1,30 +1,24 @@
 import pickle
 from pathlib import Path
+import torch
+import numpy as np
 
 from HelperFunctions import get_now
 from GCCA import GCCA
 
 
-# model_pkls = ["../models/sentence_embeddings_bert-large-nli-stsb-mean-tokens.pkl",
-#               "../models/sentence_embeddings_distilbert-base-nli-stsb-mean-tokens.pkl",
-#               "../models/sentence_embeddings_roberta-base-nli-stsb-mean-tokens.pkl",
-#               "../models/sentence_embeddings_roberta-large-nli-stsb-mean-tokens.pkl",
-#               "../models/sentence_embeddings_use.pkl"]
-# model_pkls = ["../models/sentence_embeddings_bert-large-nli-stsb-mean-tokens.pkl",
-#               "../models/sentence_embeddings_roberta-large-nli-stsb-mean-tokens.pkl"]
-# model_pkls = ["../models/sentence_embeddings_stsb-bert-large.pkl",
-#               "../models/sentence_embeddings_stsb-distilbert-base.pkl",
-#               "../models/sentence_embeddings_stsb-roberta-large.pkl"]
-model_pkls = ["../models/sentence_embeddings_stsb-bert-large.pkl",
-              "../models/sentence_embeddings_stsb-distilbert-base.pkl"]
-
+model_pkls = [
+    './stsb-bert-large_avg.pt',
+    './stsb-distilbert-base_avg.pt',
+    './stsb-mpnet-base-v2_avg.pt',
+    './stsb-roberta-large_avg.pt'
+]
 embeddings = {}
 for model_pkl in model_pkls:
     with Path(model_pkl).open('rb') as f:
-        embedding = pickle.load(f)
-    embeddings[model_pkl] = embedding
+        embeddings[model_pkl] = torch.load(f)
 
-sentences = embedding.keys()
+sentences = embeddings[model_pkl].keys()
 
 vectors = [[] for _ in range(len(model_pkls))]
 key_to_index = {key: i for i, key in enumerate(embeddings.keys())}
@@ -32,11 +26,11 @@ sentence_to_index = {}
 for i, sentence in enumerate(sentences):
     vector = []
     for model_type in embeddings.keys():
-        tmp = embeddings[model_type][sentence]
-        if type(embeddings[model_type][sentence]) is not list:
-            vectors[key_to_index[model_type]].append(embeddings[model_type][sentence].tolist())
+        # print(np.mean(embeddings[model_type][sentence]['embeddings'], axis=1).shape)
+        if type(embeddings[model_type][sentence]['embeddings']) is not list:
+            vectors[key_to_index[model_type]].append(np.mean(embeddings[model_type][sentence]['embeddings'], axis=1)[0].tolist())
         else:
-            vectors[key_to_index[model_type]].append(embeddings[model_type][sentence])
+            vectors[key_to_index[model_type]].append(np.mean(embeddings[model_type][sentence]['embeddings'], axis=1)[0])
     sentence_to_index[sentence] = i
 
 #
@@ -64,6 +58,7 @@ for i, sentence in enumerate(sentences):
 tag = get_now()
 print(tag)
 
+# vectors = torch.as_tensor(vectors, dtype=torch.float)
 gcca = GCCA(tag=tag)
 gcca.prepare(vectors)
 gcca.fit(vectors)

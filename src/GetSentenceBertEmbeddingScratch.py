@@ -2,24 +2,32 @@ import os
 import torch
 import numpy as np
 from pathlib import Path
+from senteval.utils import cosine
+from scipy.stats import spearmanr, pearsonr
 
 from sentence_transformers import SentenceTransformer
-from AbstractGetSentenceEmbedding import *
-from HelperFunctions import get_device, get_now
+# from AbstractGetSentenceEmbedding import *
+from AbstractTrainer import AbstractTrainer
+from HelperFunctions import get_device, get_now, get_metrics
+from STSDataset import STSBenchmarkDataset, STSDataset
 
 
-class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
+class GetSentenceBertWordEmbedding(AbstractTrainer):
     def __init__(self, model_name, device='cpu'):
-        super().__init__()
+        # super().__init__()
+        self.dataset_type = 'normal'
+        self.datasets_stsb = {mode: STSBenchmarkDataset(mode=mode) for mode in ['train', 'dev', 'test']}
+        self.datasets_sts = {mode: STSDataset(mode=mode) for mode in ['STS12', 'STS13', 'STS14', 'STS15', 'STS16']}
         self.device = get_device(device)
         self.model_name = model_name
+        self.model_names = [model_name]
         self.model = SentenceTransformer(model_name, device=self.device)
         # self.model.device = self.device
         self.model.to(self.device)
         self.tokenizer = self.model.tokenizer
         self.tokenization_mode = 'subword'
         self.subword_pooling_method = 'avg'
-        self.sentence_pooling_method = 'max' # max
+        self.sentence_pooling_method = 'max' # max, avg
         self.embeddings = {self.model_name: {}}
 
         self.tag = get_now()
@@ -50,13 +58,18 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
         self.with_save_embeddings = True
         self.with_save_word_embeddings = True
         self.with_embedding_updating = False
-        self.with_train_model = True
+        self.with_train_model = False
         if self.with_train_model:
             self.model.train()
             self.word_embeddings = {}
         else:
             self.model.eval()
             self.word_embeddings = self.load_model()
+        self.similarity = lambda s1, s2: np.nan_to_num(cosine(np.nan_to_num(s1), np.nan_to_num(s2)))
+        self.cosine_similarity = torch.nn.CosineSimilarity(dim=2)
+
+        self.append_information_file([f'{self.model_name}'])
+        self.append_information_file([f'{self.sentence_pooling_method}'])
 
 
 
@@ -108,8 +121,6 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
     def get_word_embedding(self, sentence, with_process_subwords=True):
         if sentence in self.word_embeddings.keys() and not self.with_train_model:
             return self.word_embeddings[sentence]
-        # sentence = sentence.replace('`', '')
-        # sentence = sentence.replace("'", "")
         if '�' in sentence:
             sentence = sentence.replace('� ', '')
         if 'o ̯ reĝ' in sentence:
@@ -181,9 +192,7 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
     def set_model(self, model_name):
         self.model_name = model_name
 
-    def batcher(self, params, batch):
-        sentences = [' '.join(sent) for sent in batch]  # To reconstruct sentence from list of words
-
+    def batch_step(self, sentences, with_training=False, with_calc_similality=False):
         sentence_embeddings = []
         for sentence in sentences:
             sentence_embedding = self.get_word_embedding(sentence)['embeddings'][0]
@@ -196,7 +205,7 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
                 # sentence_embedding = sentence_embedding.tolist()
             sentence_embeddings.append(sentence_embedding)  # get token embeddings
             self.embeddings[model_name][sentence] = sentence_embedding.tolist()
-        return torch.stack(sentence_embeddings).numpy()
+        return sentence_embeddings
 
     def save_information_file(self):
         information_file = Path(self.information_file)
@@ -209,86 +218,131 @@ class GetSentenceBertWordEmbedding(AbstractGetSentenceEmbedding):
             f.write(f'subword_pooling_method: {self.subword_pooling_method}\n')
             f.write(f'sentence_pooling_method: {self.sentence_pooling_method}\n')
 
-    def set_tag(self, tag):
-        self.tag = tag
-        self.save_model_path = f'../models/sberts-{self.tag}.pkl'
-        self.information_file = f'../results/sberts/info-{self.tag}.txt'
-
     def save_model(self):
         with Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt').open('wb') as f:
             torch.save(self.word_embeddings, f)
 
     def load_model(self):
-        if not self.with_train_model:
-            path = Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt')
-            if path.exists():
-                with Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt').open('rb') as f:
-                    return torch.load(f)
+        path = Path(f'./{self.model_name}_{self.sentence_pooling_method}.pt')
+        if (not self.with_train_model) and path.exists():
+            with path.open('rb') as f:
+                return torch.load(f)
         return {}
 
+    def set_tag(self, tag):
+        self.tag = tag
+        self.save_model_path = f'../models/sberts-{self.tag}.pkl'
+        self.information_file = f'../results/sberts/info-{self.tag}.txt'
 
-class GetSentenceBertEmbedding(AbstractGetSentenceEmbedding):
-    def __init__(self):
-        # os.environ["CUDA_VISIBLE_DEVICES"] = "7"
-        super().__init__()
-        # self.model_names = ['roberta-large-nli-stsb-mean-tokens',
-        #                     'roberta-base-nli-stsb-mean-tokens',
-        #                     'bert-large-nli-stsb-mean-tokens',
-        #                     'distilbert-base-nli-stsb-mean-tokens']
-        self.model_names = ['stsb-bert-large', 'stsb-roberta-large', 'stsb-distilbert-base', 'stsb-mpnet-base-v2']
-        # self.model_names = ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']
-        self.embeddings = {model_name: {} for model_name in self.model_names}
-        self.with_reset_output_file = False
-        self.with_save_embeddings = True
+    def inference(self, mode='dev', with_test_mode=False):
+        running_loss = 0.0
+        results = {}
+        pearson_rs, spearman_rhos = [], []
 
-    def get_model(self):
-        self.model = SentenceTransformer(self.model_name)
-        return self.model
+        # batch loop
+        sys_scores, gs_scores = [], []
+        with torch.inference_mode():
+            while not self.datasets_stsb[mode].is_batch_end(with_test_mode=with_test_mode):
+                sentences1, sentences2, scores = self.datasets_stsb[mode].get_batch()
 
-    def set_model(self, model_name):
-        self.model_name = model_name
+                # get vector representation for each embedding
+                batch_embeddings = []
+                batch_tokens = []
+                for sent1, sent2 in zip(sentences1, sentences2):
+                    embeddings = self.batch_step([sent1, sent2])
+                    sys_score = self.similarity(embeddings[0], embeddings[1])
+                    sys_scores.append(sys_score)
+                gs_scores.extend(scores)
+                # running_loss += loss
 
-    def batcher(self, params, batch):
-        sentences = [' '.join(sent) for sent in batch]  # To reconstruct sentence from list of words
-        sentence_embeddings = self.model.encode(sentences)  # get sentence embeddings
-        for sentence, sentence_embedding in zip(batch, sentence_embeddings):
-            self.embeddings[model_name][' '.join(sentence)] = sentence_embedding.tolist()
-        return sentence_embeddings
+        pearson_rs = pearsonr(sys_scores, gs_scores)[0]
+        spearman_rhos = spearmanr(sys_scores, gs_scores)[0]
+
+        avg_pearson_r = np.average(pearson_rs)
+        avg_spearman_rho = np.average(spearman_rhos)
+
+        results = {'pearson': avg_pearson_r,
+                   'spearman': avg_spearman_rho,
+                   'nsamples': len(sys_scores),
+                   'sys_scores': sys_scores,
+                   'gold_scores': gs_scores
+                   }
+
+        print_contents = [f'STSBenchmark-{mode}',
+                          f'pearson: {self.get_round_score(results["pearson"]) :.2f}',
+                          f'spearman: {self.get_round_score(results["spearman"]) :.2f}']
+        results['prints'] = print_contents
+
+        self.datasets_stsb[mode].reset()
+
+        return results
+
+    def inference_sts(self, mode='STS12', with_test_mode=False):
+        running_loss = 0.0
+        results = {}
+        pearson_rs, spearman_rhos = [], []
+
+        # batch loop
+        sys_scores, gs_scores, tag_sequence = [], [], []
+        with torch.inference_mode():
+            while not self.datasets_sts[mode].is_batch_end(with_test_mode=with_test_mode):
+                sentences1, sentences2, scores, tags = self.datasets_sts[mode].get_batch()
+
+                # get vector representation for each embedding
+                batch_embeddings = []
+                batch_tokens = []
+                for sent1, sent2 in zip(sentences1, sentences2):
+                    embeddings = self.batch_step([sent1, sent2])
+                    sys_score = self.similarity(embeddings[0], embeddings[1])
+                    sys_scores.append(sys_score)
+                gs_scores.extend(scores)
+                tag_sequence.extend(tags)
+                # running_loss += loss
+        rets = get_metrics(sys_scores, gs_scores, tags)
+
+        pearson_rs = pearsonr(sys_scores, gs_scores)[0]
+        spearman_rhos = spearmanr(sys_scores, gs_scores)[0]
+
+        avg_pearson_r = np.average(pearson_rs)
+        avg_spearman_rho = np.average(spearman_rhos)
+
+        results = {'pearson': avg_pearson_r,
+                   'spearman': avg_spearman_rho,
+                   'nsamples': len(sys_scores),
+                   'sys_scores': sys_scores,
+                   'gold_scores': gs_scores,
+                   'tags': tag_sequence
+                   }
+
+        print_contents = [f'STSBenchmark-{mode}',
+                          f'pearson: {self.get_round_score(results["pearson"]) :.2f}',
+                          f'spearman: {self.get_round_score(results["spearman"]) :.2f}']
+        results['prints'] = print_contents
+
+        self.datasets_sts[mode].reset()
+
+        return results
 
 
 if __name__ == '__main__':
-    is_pooled = False
-    if is_pooled:
-        cls = GetSentenceBertEmbedding()
-        for model_name in cls.model_names:
-            print(model_name)
-            cls.set_model(model_name)
-            cls.single_eval(model_name)
-            if cls.with_reset_output_file:
-                cls.with_reset_output_file = False
-    else:
-        import argparse
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--device', type=str, default='cpu', help='select device')
-        args = parser.parse_args()
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    for model_name in ['stsb-bert-large', 'stsb-distilbert-base', 'stsb-mpnet-base-v2', 'stsb-roberta-large']:
+        model = GetSentenceBertWordEmbedding(model_name=model_name, device='cpu')
+        print(model_name)
+        model.set_model(model_name)
+        rets = model.inference(mode='dev')
+        model.append_information_file(rets["prints"])
+        rets = model.inference(mode='test')
+        model.append_information_file(rets["prints"])
+        for mode in ['STS12', 'STS13', 'STS14', 'STS15', 'STS16']:
+            dev_rets = model.inference_sts(mode=mode, with_test_mode=False)
+            metrics = get_metrics(dev_rets['sys_scores'], dev_rets['gold_scores'], dev_rets['tags'])
+            dev_rets['prints'] = dev_rets['prints'] + [f'{k}: {v}' for k, v in metrics.items()]
+            model.append_information_file(dev_rets['prints'])
+        # rets = cls.single_eval(model_tag[0])
+        print(model.information_file)
+        model.save_model()
 
-        if args.device != 'cpu':
-            import os
-            os.environ["CUDA_VISIBLE_DEVICES"] = args.device
-
-        # for model_name in ['bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens']:
-        # for model_name in ['gpt2', 'facebook/bart-base']:
-        # for model_name in ['stsb-xlm-r-multilingual']: # ['xlm-r-100langs-bert-base-nli-stsb-mean-tokens']:
-        for model_name in ['stsb-mpnet-base-v2']:
-        # for model_name in ['stsb-bert-large', 'stsb-roberta-large', 'stsb-distilbert-base']:
-            cls = GetSentenceBertWordEmbedding(model_name=model_name, device=args.device)
-            cls.set_tag(get_now())
-            print(f'{model_name}, {cls.sentence_pooling_method}')
-            cls.set_model(model_name)
-            cls.single_eval(model_name)
-            if cls.with_reset_output_file:
-                cls.with_reset_output_file = False
-            cls.save_model()
 
 
 

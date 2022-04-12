@@ -57,7 +57,9 @@ class STSBenchmarkDataset:
         if with_shuffle:
             self.shuffle()
 
-    def is_batch_end(self):
+    def is_batch_end(self, with_test_mode=False):
+        if with_test_mode and self.current >= 100:
+            return True
         if self.batch_mode == 'full':
             if self.current == self.dataset_size:
                 return True
@@ -156,7 +158,9 @@ class STSDataset(STSBenchmarkDataset):
         tags = [b['tag'] for b in batch]
         return sentences1, sentences2, scores, tags
 
-    def is_batch_end(self):
+    def is_batch_end(self, with_test_mode=False):
+        if with_test_mode and self.current >= 100:
+            return True
         if self.current >= self.dataset_size:
             return True
         return False

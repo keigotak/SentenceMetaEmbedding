@@ -128,13 +128,14 @@ class GCCA:
 
     def prepare(self, all_vectors):
         '''
-        :param vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
+        :param all_vectors: axis0 is embedding source, axis1 is batch size, and axis2 is dimention of each source
         :return: transformed vectors
         '''
         mean_vectors = []
         std_vectors = []
 
         for vectors in all_vectors:
+            # m = torch.mean(torch.as_tensor(vectors, dtype=torch.float), dim=0).numpy()
             m = np.mean(vectors, axis=0)
             mean_vectors.append(m.copy())
             s = np.std(vectors, axis=0)

@@ -49,15 +49,15 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.va = VectorAttention(model_names=self.model_names).to(self.device)
         self.va.train()
 
+        self.source_pooling_method = 'concat' # avg, concat
+        self.sentence_pooling_method = 'max' # avg, max
         self.model_dims = self.va.model_dims
         self.source = self.get_source_embeddings()
         self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
         self.total_dim = sum(self.embedding_dims.values())
 
-        self.tokenization_mode = self.source[self.model_names[0]].tokenization_mode
-        self.subword_pooling_method = self.source[self.model_names[0]].subword_pooling_method
-        self.source_pooling_method = 'concat' # avg, concat
-        self.sentence_pooling_method = 'max' # avg, max
+        self.tokenization_mode = 'subword'
+        self.subword_pooling_method = 'avg'
 
         self.gradient_clip = 0.0
         self.weight_decay = 1e-4
@@ -100,15 +100,8 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
     def get_source_embeddings(self):
         sources = {}
         for model in self.model_names:
-            if model in set(['roberta-large-nli-stsb-mean-tokens', 'bert-large-nli-stsb-mean-tokens', 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens', 'stsb-mpnet-base-v2', 'stsb-roberta-large', 'stsb-mpnet-base-v2', 'stsb-bert-large', 'stsb-distilbert-base']):
-                sources[model] = GetSentenceBertWordEmbedding(model, device=self.device)
-                # sources[model].train()
-            elif model == 'glove':
-                sources[model] = GloVeModel()
-            elif model == 'use':
-                sources[model] = GetUniversalSentenceEmbedding()
-            else:
-                sources[model] = GetHuggingfaceWordEmbedding(model, device=self.device)
+            with Path(f'./{model}_{self.sentence_pooling_method}.pt').open('rb') as f:
+                sources[model] = torch.load(f)
         return sources
 
     def batch_step(self, batch_embeddings, scores, with_training=False, with_calc_similality=False):
@@ -189,12 +182,9 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
 
         if with_training:
             loss.backward()
-            if self.gradient_clip > 0:
+            if self.gradient_clip > 0.0:
                 nn.utils.clip_grad_norm_(self.parameters, self.gradient_clip)
             self.optimizer.step()
-            del loss
-
-        # torch.cuda.empty_cache()
 
         return gs_scores, sys_scores, running_loss
 
@@ -353,6 +343,58 @@ class TrainVectorAttentionWithSTSBenchmark(AbstractTrainer):
         self.batch_size = hyper_params['batch_size']
         self.datasets_stsb['train'].batch_size = self.batch_size
 
+    def train_epoch(self, with_pbar=False):
+        mode = 'train'
+        if with_pbar:
+            pbar = tqdm(total=self.datasets_stsb[mode].dataset_size)
+
+        ## batch loop
+        while not self.datasets_stsb[mode].is_batch_end():
+            sentences1, sentences2, scores = self.datasets_stsb[mode].get_batch()
+
+            ## get vector representation for each embedding and batch data
+            with torch.inference_mode(): # this line must be allocate outside of self.batch_step scope
+                batch_embeddings = []
+                batch_tokens = []
+                for sent1, sent2 in zip(sentences1, sentences2):
+                    embeddings = {}
+                    tokens = {}
+                    for model_name in self.model_names:
+                        index, token, embedding = [], [], []
+                        for sent in [sent1, sent2]:
+                            ret = self.source[model_name][sent]
+                            index.extend(ret['ids'])
+                            token.extend(ret['tokens'])
+                            embedding.extend(ret['embeddings'])
+                        rets = {'ids': index, 'tokens': token, 'embeddings': embedding}
+
+                        if False:
+                            print('\t'.join([' '.join(items) for items in rets['tokens']]))
+                        embeddings[model_name] = rets['embeddings']
+                        tokens[model_name] = rets['tokens']
+                    batch_embeddings.append(embeddings)  ## batch, embedding type, sentence source, sentence length, hidden size
+                    batch_tokens.append(tokens)
+
+            ## get attention output
+            _, _, _ = self.batch_step(batch_embeddings, scores, with_training=True)
+
+            if with_pbar:
+                pbar.update(self.datasets_stsb[mode].batch_size)
+
+            # print(str(self.datasets_stsb[mode]) + f' loss: {running_loss}')
+
+        if with_pbar:
+            pbar.close()
+
+    def get_word_embeddings(self, sent1, sent2):
+        ids, tokens, embedding = [], [], []
+        for sent in [sent1, sent2]:
+            rets = self.get_word_embedding(sent)
+            ids.extend(rets['ids'])
+            tokens.extend(rets['tokens'])
+            embedding.extend(rets['embeddings'])
+
+        return {'ids': ids, 'tokens': tokens, 'embeddings': embedding}
 
 class EvaluateVectorAttentionModel(AbstractGetSentenceEmbedding):
     def __init__(self, device):

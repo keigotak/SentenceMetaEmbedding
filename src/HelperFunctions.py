@@ -26,12 +26,7 @@ def get_device(device):
     if device == 'cpu':
         return torch.device('cpu')
     else:
-        if type(device) != int:
-            device = int(device)
-        if torch.cuda.is_available():
-            return torch.device(0)
-        else:
-            return torch.device('cpu')
+        return torch.device(0)
 
 def get_metrics(sys_scores, gold_scores, tags):
     rets = {}

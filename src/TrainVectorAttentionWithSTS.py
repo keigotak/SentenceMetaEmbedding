@@ -29,7 +29,7 @@ class VectorAttention(nn.Module):
         self.model_names = model_names
         self.model_dims = {'bert-large-uncased': 1024, 'roberta-large': 1024, 'roberta-large-nli-stsb-mean-tokens': 1024, 'bert-large-nli-stsb-mean-tokens': 1024, 'glove': 300, 'use': 512, 'xlm-r-100langs-bert-base-nli-stsb-mean-tokens': 768, 'stsb-mpnet-base-v2': 768, 'sentence-transformers/stsb-bert-large': 1024, 'sentence-transformers/stsb-roberta-large': 1024, 'sentence-transformers/stsb-distilbert-base': 768, 'stsb-bert-large': 1024, 'stsb-roberta-large': 1024, 'stsb-distilbert-base': 768}
         self.embedding_dims = {model: self.model_dims[model] for model in self.model_names}
-        self.meta_embedding_dim = 1024
+        self.meta_embedding_dim = 4096
         self.projection_matrices = nn.ModuleDict({model: nn.Linear(self.embedding_dims[model], self.meta_embedding_dim, bias=False) for model in self.model_names})
         self.max_sentence_length = 128
         self.vector_attention = nn.ModuleDict({model: nn.Linear(1, 1, bias=False) for model in self.model_names})
@@ -42,7 +42,7 @@ class TrainVectorAttentionWithSTS(AbstractTrainer):
         if model_names is not None:
             self.model_names = model_names
         else:
-            self.model_names = ['stsb-bert-large', 'stsb-distilbert-base', 'stsb-mpnet-base-v2'] # ['stsb-mpnet-base-v2', 'bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens'] # , 'glove', 'sentence-transformers/xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
+            self.model_names = ['stsb-bert-large', 'stsb-distilbert-base', 'stsb-roberta-large'] # ['stsb-mpnet-base-v2', 'bert-large-nli-stsb-mean-tokens', 'roberta-large-nli-stsb-mean-tokens'] # , 'glove', 'sentence-transformers/xlm-r-100langs-bert-base-nli-stsb-mean-tokens'
         self.va = VectorAttention(model_names=self.model_names).to(self.device)
         self.va.train()
 
@@ -62,7 +62,7 @@ class TrainVectorAttentionWithSTS(AbstractTrainer):
         self.with_projection_matrix = True
         self.with_train_coefficients = True
         self.with_train_model = False
-        self.loss_mode = 'rscore' # word, cos, rscore
+        self.loss_mode = 'word' # word, cos, rscore
 
         self.alpha = nn.Linear(1, 1, bias=False).to(device=self.device)
         self.lam = nn.Linear(1, 1, bias=False).to(device=self.device)
@@ -144,12 +144,12 @@ class TrainVectorAttentionWithSTS(AbstractTrainer):
 
                         words1 = word_embedding[self.model_names[iw1]]
                         words2 = word_embedding[self.model_names[iw2]]
-                        distance = torch.cdist(words1.contiguous(), words2.contiguous())
-                        cosine_similarity = self.cosine_similarity(words1, words2)
+                        euclid_distance = torch.cdist(words1.contiguous(), words2.contiguous())
+                        cosine_distance = sim_matrix(words1, words2)
 
-                        placeholder = torch.eye(distance.shape[1]).unsqueeze(0).repeat(distance.shape[0], 1, 1)
-                        loss1.append(distance[placeholder == 1.])
-                        loss2.append(-(self.alpha.weight * distance[placeholder == 0.]).squeeze())
+                        placeholder = torch.eye(cosine_distance.shape[1]).unsqueeze(0).repeat(cosine_distance.shape[0], 1, 1)
+                        loss1.append(cosine_distance[placeholder == 1.])
+                        loss2.append(-(self.alpha.weight * cosine_distance[placeholder == 0.]).squeeze())
 
                         # sentence_length = words1.shape[1]
                         # for i in range(sentence_length):
@@ -292,7 +292,6 @@ class TrainVectorAttentionWithSTS(AbstractTrainer):
             f.write(str(self.optimizer))
             f.write('\n')
 
-
     def set_tag(self, tag):
         self.tag = tag
         self.information_file = f'../results/vec_attention/info-{self.tag}.txt'
@@ -317,6 +316,15 @@ class TrainVectorAttentionWithSTS(AbstractTrainer):
         self.batch_size = hyper_params['batch_size']
         self.datasets_stsb['train'].batch_size = self.batch_size
 
+def sim_matrix(a, b, eps=1e-8):
+    """
+    added eps for numerical stability
+    """
+    a_n, b_n = a.norm(dim=2)[:, :, None], b.norm(dim=2)[:, :, None]
+    a_norm = a / torch.clamp(a_n, min=eps)
+    b_norm = b / torch.clamp(b_n, min=eps)
+    sim_mt = torch.bmm(a_norm, b_norm.transpose(1, 2))
+    return sim_mt
 
 if __name__ == '__main__':
     import argparse
@@ -361,7 +369,7 @@ if __name__ == '__main__':
         model.load_model()
         rets = model.inference(mode='test')
         print(f'test best scores: ' + ' '.join(rets['prints']))
-        model.append_information_file([f'test best scores: {" ".join(rets["prints"])}'])
+        model.append_information_file(rets["prints"])
         for mode in ['STS12', 'STS13', 'STS14', 'STS15', 'STS16']:
             dev_rets = model.inference_sts(mode=mode)
             metrics = get_metrics(dev_rets['sys_scores'], dev_rets['gold_scores'], dev_rets['tags'])
